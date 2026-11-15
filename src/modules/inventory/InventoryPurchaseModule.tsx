@@ -44,6 +44,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
 import { ExcelImportModule } from '../import/ExcelImportModule';
+import { ModuleHeader, SegmentedTabs, StatCard } from '../../components/glass';
 
 export type InventoryModuleSection =
   | 'PRODUCTS'
@@ -669,47 +670,17 @@ export function InventoryPurchaseModule({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* CABECERA EJECUTIVA Y NAVEGADOR INTERNO DE LOS 8 SUB-MÓDULOS */}
-      <section
-        className="rtw-card"
-        style={{
-          background: 'linear-gradient(135deg, #0f141c 0%, #1b2433 100%)',
-          color: '#f8fafc',
-          border: '1px solid rgba(212, 175, 55, 0.38)'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '14px'
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <span className="rtw-badge rtw-badge-gold">
-                INVENTARIO, CATÁLOGO Y COMPRAS
-              </span>
-              <span style={{ fontSize: '0.76rem', color: '#cbd5e1' }}>
-                <Lock size={13} color="#d4af37" style={{ verticalAlign: 'middle' }} /> Control de Concurrencia (`lockVersion`) · Idempotente · Multipropietario
-              </span>
-            </div>
-            <h2 style={{ fontSize: '1.22rem', fontWeight: 800, color: '#ffffff' }}>
-              Gestión Integral de Productos, Proveedores, Compras, Recepciones e Inventario
-            </h2>
-            <p style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '4px', maxWidth: '820px' }}>
-              Conectado a la base de datos y al importador Excel inicial de{' '}
-              <strong>Eberto (OWN-0001)</strong>. Separa cantidades y costos por lote y propietario,
-              prohíbe borrar movimientos históricos, prohíbe autoasignar propietarios futuros y previene
-              doble contabilización y stock negativo.
-            </p>
-          </div>
-
+    <div className="module-container">
+      {/* CABECERA EJECUTIVA */}
+      <ModuleHeader
+        variant="dark"
+        eyebrow="OPERACIONES · CATÁLOGO Y STOCK"
+        title="Productos, Compras e Inventario"
+        subtitle="Administra tu catálogo por variantes, proveedores, recepciones y stock disponible por lote."
+        actions={
           <button
             type="button"
+            className="rtw-btn rtw-btn-gold btn-sm"
             disabled={isSyncingBaseline}
             onClick={async () => {
               setIsSyncingBaseline(true);
@@ -718,153 +689,118 @@ export function InventoryPurchaseModule({
               setIsSyncingBaseline(false);
               notify(
                 'info',
-                'Sincronización con Excel verificada',
-                'Los 40 SKUs y 37 lotes iniciales de Eberto (OWN-0001) están activos.'
+                'Base sincronizada',
+                'Catálogo y lotes iniciales actualizados correctamente.'
               );
-            }}
-            style={{
-              background: '#d4af37',
-              color: '#0f141c',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '9px 14px',
-              fontSize: '0.8rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px'
             }}
           >
             <RotateCcw size={14} />
-            {isSyncingBaseline ? 'Sincronizando...' : 'Sincronizar Base Excel (OWN-0001)'}
+            {isSyncingBaseline ? 'Sincronizando...' : 'Sincronizar base'}
           </button>
-        </div>
-
-        {/* PESTAÑAS INTERNAS */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            flexWrap: 'wrap',
-            marginTop: '14px',
-            paddingTop: '12px',
-            borderTop: '1px solid rgba(255,255,255,0.12)'
-          }}
-        >
-          {[
-            {
-              id: 'PRODUCTS' as InventoryModuleSection,
-              label: `Productos y SKU (${catalogList.length})`,
-              icon: Package
-            },
-            {
-              id: 'SUPPLIERS' as InventoryModuleSection,
-              label: `Proveedores (${Object.keys(store.suppliers).length})`,
-              icon: Building2
-            },
-            {
-              id: 'PURCHASES_RECEPTIONS' as InventoryModuleSection,
-              label: `Compras y Recepciones (${store.purchaseOrders.length})`,
-              icon: Truck
-            },
-            {
-              id: 'INVENTORY_OPERATIONS' as InventoryModuleSection,
-              label: `Inventario por Lote y Operaciones (${filteredAllocations.length})`,
-              icon: Boxes
-            },
-            {
-              id: 'MOVEMENTS_LEDGER' as InventoryModuleSection,
-              label: `Kardex Inmutable (${store.movements.length})`,
-              icon: History
-            },
-            {
-              id: 'REPORTS' as InventoryModuleSection,
-              label: '6 Reportes Analíticos',
-              icon: BarChart3
-            },
-            {
-              id: 'TESTS_9' as InventoryModuleSection,
-              label: '9 Pruebas Obligatorias',
-              icon: ShieldCheck
-            },
-            {
-              id: 'EXCEL_IMPORT' as InventoryModuleSection,
-              label: 'Motor Importador Excel',
-              icon: FileSpreadsheet
-            }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeSection === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveSection(tab.id)}
-                style={{
-                  background: active ? '#d4af37' : 'rgba(255,255,255,0.06)',
-                  color: active ? '#0f141c' : '#e2e8f0',
-                  border: active ? '1px solid #d4af37' : '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  fontWeight: active ? 800 : 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Icon size={14} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+        }
+        bottomSlot={
+          <SegmentedTabs<InventoryModuleSection>
+            variant="dark"
+            value={activeSection}
+            onChange={setActiveSection}
+            items={[
+              {
+                id: 'PRODUCTS',
+                label: 'Productos',
+                icon: <Package size={14} />,
+                count: catalogList.length
+              },
+              {
+                id: 'SUPPLIERS',
+                label: 'Proveedores',
+                icon: <Building2 size={14} />,
+                count: Object.keys(store.suppliers).length
+              },
+              {
+                id: 'PURCHASES_RECEPTIONS',
+                label: 'Compras y Recepciones',
+                icon: <Truck size={14} />,
+                count: store.purchaseOrders.length
+              },
+              {
+                id: 'INVENTORY_OPERATIONS',
+                label: 'Inventario',
+                icon: <Boxes size={14} />,
+                count: filteredAllocations.length
+              },
+              {
+                id: 'MOVEMENTS_LEDGER',
+                label: 'Kardex',
+                icon: <History size={14} />,
+                count: store.movements.length
+              },
+              {
+                id: 'REPORTS',
+                label: 'Reportes',
+                icon: <BarChart3 size={14} />
+              },
+              {
+                id: 'EXCEL_IMPORT',
+                label: 'Importar',
+                icon: <FileSpreadsheet size={14} />
+              },
+              {
+                id: 'TESTS_9',
+                label: 'Diagnóstico',
+                icon: <ShieldCheck size={14} />
+              }
+            ]}
+          />
+        }
+      />
 
       {/* KPIS DE INVENTARIO EN TIEMPO REAL */}
       <section className="rtw-kpi-grid">
-        <div className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Stock Físico Total</div>
-          <div className="rtw-kpi-value">{formatInteger(kpis.physical)} Unid.</div>
-          <div className="rtw-kpi-sub">{kpis.activeLots} asignaciones de lote por propietario</div>
-        </div>
-        <div className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Stock Apto (Calidad OK)</div>
-          <div className="rtw-kpi-value" style={{ color: '#166534' }}>
-            {formatInteger(kpis.good)} Unid.
-          </div>
-          <div className="rtw-kpi-sub">Liberadas tras inspección técnica</div>
-        </div>
-        <div className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Stock Pendiente Revisión</div>
-          <div className="rtw-kpi-value" style={{ color: '#b45309' }}>
-            {formatInteger(kpis.pending)} Unid.
-          </div>
-          <div className="rtw-kpi-sub">No disponibles hasta aprobar calidad</div>
-        </div>
-        <div className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Defectuoso / Reservado</div>
-          <div className="rtw-kpi-value">
-            {formatInteger(kpis.defective)} / {formatInteger(kpis.reserved)}
-          </div>
-          <div className="rtw-kpi-sub">Bloqueadas para venta comercial</div>
-        </div>
-        <div className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Stock Disponible (Venta)</div>
-          <div className="rtw-kpi-value" style={{ color: '#0f172a' }}>
-            {formatInteger(kpis.available)} Unid.
-          </div>
-          <div className="rtw-kpi-sub">Valorizado activo: {formatCOP(kpis.totalCostCop)}</div>
-        </div>
+        <StatCard
+          staggerIndex={1}
+          label="Stock Físico"
+          value={`${formatInteger(kpis.physical)} u.`}
+          sub={`${kpis.activeLots} asignaciones por lote`}
+          icon={<Boxes size={16} />}
+        />
+        <StatCard
+          staggerIndex={2}
+          tone="success"
+          label="Apto (Calidad OK)"
+          value={`${formatInteger(kpis.good)} u.`}
+          sub="Aprobadas en inspección"
+          icon={<ClipboardCheck size={16} />}
+        />
+        <StatCard
+          staggerIndex={3}
+          tone="warning"
+          label="En Revisión"
+          value={`${formatInteger(kpis.pending)} u.`}
+          sub="Pendientes de liberar"
+          icon={<Lock size={16} />}
+        />
+        <StatCard
+          staggerIndex={4}
+          label="Defectuoso / Reservado"
+          value={`${formatInteger(kpis.defective)} / ${formatInteger(kpis.reserved)}`}
+          sub="No disponibles para venta"
+          icon={<ArrowRightLeft size={16} />}
+        />
+        <StatCard
+          staggerIndex={5}
+          tone="gold"
+          label="Disponible para Venta"
+          value={`${formatInteger(kpis.available)} u.`}
+          sub={`Valorizado: ${formatCOP(kpis.totalCostCop)}`}
+          icon={<Package size={16} />}
+        />
       </section>
 
       {/* =====================================================================
           SECCIÓN 1: PRODUCTOS (CATÁLOGO MAESTRO, VARIANTES, SKU, FOTOS, HISTORIAL)
          ===================================================================== */}
       {activeSection === 'PRODUCTS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '16px' }}>
+        <div className="rtw-split-grid">
           <section className="rtw-card">
             <div
               style={{
@@ -1067,7 +1003,7 @@ export function InventoryPurchaseModule({
           SECCIÓN 2: PROVEEDORES (REGISTRO, CONTACTO, REFERENCIAS, COMPRAS, HISTORIAL)
          ===================================================================== */}
       {activeSection === 'SUPPLIERS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '16px' }}>
+        <div className="rtw-split-grid">
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
               Directorio Auditado de Proveedores ({Object.keys(store.suppliers).length})
@@ -1447,7 +1383,7 @@ export function InventoryPurchaseModule({
           SECCIÓN 4: INVENTARIO POR LOTE Y OPERACIONES TRANSACCIONALES
          ===================================================================== */}
       {activeSection === 'INVENTORY_OPERATIONS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.65fr 1fr', gap: '16px' }}>
+        <div className="rtw-split-grid">
           <section className="rtw-card">
             <div
               style={{

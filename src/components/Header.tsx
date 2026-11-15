@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronRight, Database, Lock, LogOut, Menu, Shield, UserCheck } from 'lucide-react';
+import { ChevronRight, Lock, LogOut, Menu, Shield, UserCheck } from 'lucide-react';
 import { NAVIGATION_ITEMS } from '../lib/navigation';
 import { ROLES_CATALOG, ROUTE_PERMISSIONS } from '../lib/permissions';
 import { useOwnerScope } from '../hooks/useOwnerScope';
@@ -71,26 +71,28 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
       <div className="rtw-header-left">
         <button
           type="button"
-          className="rtw-btn rtw-btn-outline rtw-mobile-only"
+          className="rtw-btn rtw-btn-outline btn-sm rtw-mobile-only"
           onClick={onOpenMobileMenu}
           aria-label="Abrir navegación"
         >
-          <Menu size={18} />
+          <Menu size={17} />
         </button>
 
         <div style={{ minWidth: 0 }}>
           <nav className="rtw-breadcrumbs" aria-label="Ruta actual">
             <Link to="/">Inicio</Link>
-            <ChevronRight size={12} />
+            <ChevronRight size={11} />
             <span>{currentNav.group}</span>
-            <ChevronRight size={12} />
-            <span style={{ color: '#0f172a', fontWeight: 600 }}>{currentNav.label}</span>
+            <ChevronRight size={11} />
+            <span style={{ color: 'var(--rtw-text-primary)', fontWeight: 600 }}>
+              {currentNav.label}
+            </span>
           </nav>
           <h1
             style={{
               fontSize: '1.08rem',
               fontWeight: 800,
-              color: '#0f172a',
+              color: 'var(--rtw-text-primary)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis'
@@ -102,21 +104,20 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
       </div>
 
       <div className="rtw-header-right">
-        {/* Inspector de rol disponible exclusivamente para administradores autenticados */}
+        {/* Inspector de rol (solo administradores) */}
         {canInspectRoles && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <UserCheck size={15} color="#166534" />
+          <div className="rtw-header-pill" title="Previsualizar vista según rol">
+            <UserCheck size={14} color="var(--rtw-success-text)" />
             <label
               htmlFor="header-role-selector"
               className="rtw-desktop-only"
-              style={{ fontSize: '0.74rem', fontWeight: 700, color: '#475569' }}
+              style={{ fontSize: '0.73rem', fontWeight: 600, color: 'var(--rtw-text-muted)' }}
             >
-              Vista Rol:
+              Rol:
             </label>
             <select
               id="header-role-selector"
-              className="rtw-select"
-              style={{ fontWeight: 700, padding: '6px 10px', minHeight: '34px' }}
+              className="rtw-header-select"
               value={activeEffectiveRole}
               onChange={(e) => {
                 const nextRole = e.target.value as UserRole;
@@ -130,7 +131,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
             >
               {ALL_ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {ROLES_CATALOG[r]?.label ?? r}
                 </option>
               ))}
             </select>
@@ -138,62 +139,74 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
         )}
 
         {/* Selector Global Multipropietario */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {isOwnerLocked ? (
-            <span
-              className="rtw-badge rtw-badge-gold"
-              title="Cuenta restringida por seguridad a su propio código de propietario"
+        {isOwnerLocked ? (
+          <span
+            className="rtw-badge rtw-badge-gold"
+            title="Cuenta vinculada a tu código de propietario"
+          >
+            <Lock size={12} />
+            {lockedOwnerRecord
+              ? `${lockedOwnerRecord.internal_code} · ${lockedOwnerRecord.full_name}`
+              : lockedOwnerId || 'Sin propietario'}
+          </span>
+        ) : (
+          <div className="rtw-header-pill" title="Filtrar vista por propietario">
+            <Shield size={14} color="var(--rtw-gold-ink)" />
+            <label
+              htmlFor="global-owner-scope"
+              className="rtw-desktop-only"
+              style={{ fontSize: '0.73rem', fontWeight: 600, color: 'var(--rtw-text-muted)' }}
             >
-              <Lock size={13} />
-              {lockedOwnerRecord
-                ? `${lockedOwnerRecord.internal_code} — ${lockedOwnerRecord.full_name}`
-                : lockedOwnerId || 'Sin propietario asignado'}
-            </span>
-          ) : (
-            <>
-              <Shield size={15} color="#b45309" />
-              <label
-                htmlFor="global-owner-scope"
-                className="rtw-desktop-only"
-                style={{ fontSize: '0.74rem', fontWeight: 700, color: '#475569' }}
-              >
-                Propietario:
-              </label>
-              <select
-                id="global-owner-scope"
-                className="rtw-select"
-                style={{ padding: '6px 10px', minHeight: '34px' }}
-                value={selectedOwnerScope}
-                onChange={(e) => {
-                  const nextScope = e.target.value;
-                  const chosen = liveOwners.find((o) => o.id === nextScope);
-                  setSelectedOwnerScope(nextScope);
-                  notify(
-                    'info',
-                    'Alcance multipropietario actualizado',
-                    nextScope === 'ALL'
-                      ? 'Mostrando vista consolidada de todos los propietarios.'
-                      : `Filtrado por ${chosen ? `${chosen.internal_code} — ${chosen.full_name}` : nextScope}.`
-                  );
-                }}
-              >
-                <option value="ALL">Todos los propietarios</option>
-                {liveOwners.map((owner) => (
-                  <option key={owner.id} value={owner.id}>
-                    {owner.internal_code} — {owner.full_name}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
+              Propietario:
+            </label>
+            <select
+              id="global-owner-scope"
+              className="rtw-header-select"
+              value={selectedOwnerScope}
+              onChange={(e) => {
+                const nextScope = e.target.value;
+                const chosen = liveOwners.find((o) => o.id === nextScope);
+                setSelectedOwnerScope(nextScope);
+                notify(
+                  'info',
+                  'Alcance actualizado',
+                  nextScope === 'ALL'
+                    ? 'Mostrando todos los propietarios.'
+                    : `Filtrado por ${chosen ? `${chosen.internal_code} — ${chosen.full_name}` : nextScope}.`
+                );
+              }}
+            >
+              <option value="ALL">Todos</option>
+              {liveOwners.map((owner) => (
+                <option key={owner.id} value={owner.id}>
+                  {owner.internal_code} · {owner.full_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <span
-          className={`rtw-badge ${isSupabaseReady ? 'rtw-badge-success' : 'rtw-badge-warning'} rtw-desktop-only`}
-          title="Estado de conexión con Supabase"
+          className={`rtw-header-pill rtw-desktop-only`}
+          title={isSupabaseReady ? 'Sincronizado con Supabase' : 'Modo sin conexión'}
         >
-          <Database size={13} />
-          {isSupabaseReady ? 'Conectado' : 'Sin conexión'}
+          <span
+            className={isSupabaseReady ? 'rtw-live-dot' : undefined}
+            style={
+              !isSupabaseReady
+                ? {
+                    width: 7,
+                    height: 7,
+                    borderRadius: 999,
+                    background: '#f59e0b',
+                    display: 'inline-block'
+                  }
+                : undefined
+            }
+          />
+          <span style={{ fontWeight: 600, fontSize: '0.74rem' }}>
+            {isSupabaseReady ? 'En línea' : 'Sin conexión'}
+          </span>
         </span>
 
         {canAccessSecurityModule && (
@@ -201,7 +214,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
             type="button"
             className="rtw-btn rtw-btn-outline btn-sm"
             onClick={() => navigate('/gestion/usuarios')}
-            title="Gestión de usuarios, roles y seguridad"
+            title="Usuarios y permisos"
           >
             <Shield size={14} />
             <span className="rtw-desktop-only">Usuarios</span>

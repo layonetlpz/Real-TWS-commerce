@@ -59,6 +59,7 @@ import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
+import { ModuleHeader, SegmentedTabs, StatCard } from '../../components/glass';
 
 export type CommercialSectionTab =
   | 'ORDERS'
@@ -446,144 +447,107 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
   return (
     <div className="module-container">
       {/* ENCABEZADO EJECUTIVO */}
-      <div className="card" style={{ marginBottom: '1.25rem' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '1rem'
-          }}
-        >
-          <div>
-            <span className="badge badge-gold" style={{ marginBottom: '0.5rem' }}>
-              CENTRO COMERCIAL, PEDIDOS MULTIPROPIETARIO Y CRM
-            </span>
-            <h1 style={{ fontSize: '1.45rem', margin: 0 }}>
-              Centro Comercial, Pedidos Multipropietario, CRM y Despachos
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', marginTop: '0.35rem', fontSize: '0.9rem' }}>
-              Cada línea de pedido conserva lote, propietario y costo vendido (`COGS`). Sin pagos automáticos, sin pasarelas pagas y sin envío de mensajes automáticos.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="COMERCIAL · VENTAS Y CRM"
+        title="Pedidos, Clientes, CRM y Despachos"
+        subtitle="Gestiona tus ventas por lote y propietario, seguimiento de clientes y envíos."
+        actions={
+          <>
             {!isOwnerRole && (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="rtw-btn rtw-btn-ghost-dark btn-sm"
                 onClick={() => setRevealPersonalData((prev) => !prev)}
-                title="Proteger o mostrar datos personales de clientes en pantalla"
+                title="Mostrar u ocultar datos de contacto"
               >
-                {revealPersonalData ? <EyeOff size={16} /> : <Eye size={16} />}
-                {revealPersonalData ? 'Ocultar Datos Personales' : 'Mostrar Datos Personales'}
+                {revealPersonalData ? <EyeOff size={15} /> : <Eye size={15} />}
+                {revealPersonalData ? 'Ocultar datos' : 'Mostrar datos'}
               </button>
             )}
             <button
               type="button"
-              className="btn btn-primary"
+              className="rtw-btn rtw-btn-gold btn-sm"
               onClick={() => {
                 setActiveTab('ORDERS');
                 openNewOrderBuilder();
               }}
             >
-              <Plus size={16} />
-              Crear Nuevo Pedido
+              <Plus size={15} />
+              Nuevo pedido
             </button>
-          </div>
-        </div>
+          </>
+        }
+        bottomSlot={
+          <SegmentedTabs<CommercialSectionTab>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              {
+                id: 'ORDERS',
+                label: 'Pedidos',
+                icon: <ShoppingBag size={14} />,
+                count: salesState.orders.length
+              },
+              {
+                id: 'CUSTOMERS',
+                label: 'Clientes',
+                icon: <UserCheck size={14} />,
+                count: salesState.customers.length
+              },
+              {
+                id: 'CRM_PIPELINE',
+                label: 'CRM',
+                icon: <MessageSquareHeart size={14} />,
+                count: salesState.leads.length
+              },
+              {
+                id: 'SHIPMENTS',
+                label: 'Despachos',
+                icon: <PackageCheck size={14} />,
+                count: salesState.shipments.length
+              },
+              { id: 'TESTS_9', label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }
+            ]}
+          />
+        }
+      />
 
-        {/* KPIs COMERCIALES */}
-        <div
-          className="kpi-grid"
-          style={{ marginTop: '1.15rem', gridTemplateColumns: 'repeat(auto-fit, minmax(195px, 1fr))' }}
-        >
-          <div className="kpi-card">
-            <span className="kpi-label">Pedidos Activos / Prospectos CRM</span>
-            <div className="kpi-value">
-              {activeOrdersList.length} pedidos / {salesState.leads.length} leads
-            </div>
-            <span className="kpi-sub">
-              {salesState.customers.length} cliente(s) únicos sin duplicados
-            </span>
-          </div>
-          <div className="kpi-card">
-            <span className="kpi-label">Ventas Netas Mercancía</span>
-            <div className="kpi-value" style={{ color: 'var(--accent-gold)' }}>
-              {formatCOP(totalNetMerchandiseCop)}
-            </div>
-            <span className="kpi-sub">Atribuidas por lote y propietario</span>
-          </div>
-          <div className="kpi-card">
-            <span className="kpi-label">Utilidad Operativa Pedidos</span>
-            <div className="kpi-value" style={{ color: 'var(--status-success)' }}>
-              {formatCOP(totalOperatingProfitCop)}
-            </div>
-            <span className="kpi-sub">Venta neta - COGS + resultado envío</span>
-          </div>
-          <div className="kpi-card">
-            <span className="kpi-label">Recaudo Efectivo vs. Por Cobrar</span>
-            <div className="kpi-value">{formatCOP(totalCollectedCop)}</div>
-            <span className="kpi-sub" style={{ color: totalPendingReceivableCop > 0 ? 'var(--status-warning)' : 'var(--text-muted)' }}>
-              Por cobrar: {formatCOP(totalPendingReceivableCop)}
-            </span>
-          </div>
-        </div>
-
-        {/* NAVEGACIÓN DE SUBMÓDULOS COMERCIALES */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '0.5rem',
-            flexWrap: 'wrap',
-            marginTop: '1.15rem',
-            paddingTop: '1rem',
-            borderTop: '1px solid var(--border-subtle)'
-          }}
-        >
-          <button
-            type="button"
-            className={`btn ${activeTab === 'ORDERS' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('ORDERS')}
-          >
-            <ShoppingBag size={16} />
-            1. Pedidos y Rentabilidad ({salesState.orders.length})
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'CUSTOMERS' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('CUSTOMERS')}
-          >
-            <UserCheck size={16} />
-            2. Clientes e Historial ({salesState.customers.length})
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'CRM_PIPELINE' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('CRM_PIPELINE')}
-          >
-            <MessageSquareHeart size={16} />
-            3. Pipeline CRM ({salesState.leads.length})
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'SHIPMENTS' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('SHIPMENTS')}
-          >
-            <PackageCheck size={16} />
-            4. Despachos y Guías ({salesState.shipments.length})
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'TESTS_9' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('TESTS_9')}
-          >
-            <ShieldCheck size={16} />
-            5. 9 Pruebas Obligatorias
-          </button>
-        </div>
-      </div>
+      {/* KPIs COMERCIALES */}
+      <section className="rtw-kpi-grid">
+        <StatCard
+          staggerIndex={1}
+          label="Pedidos y Prospectos"
+          value={`${activeOrdersList.length} / ${salesState.leads.length}`}
+          sub={`${salesState.customers.length} clientes registrados`}
+          icon={<ShoppingBag size={16} />}
+        />
+        <StatCard
+          staggerIndex={2}
+          tone="gold"
+          label="Ventas Netas"
+          value={formatCOP(totalNetMerchandiseCop)}
+          sub="Atribuidas por lote y propietario"
+          icon={<TrendingUp size={16} />}
+        />
+        <StatCard
+          staggerIndex={3}
+          tone="success"
+          label="Utilidad Operativa"
+          value={formatCOP(totalOperatingProfitCop)}
+          sub="Venta neta menos costo y envío"
+          icon={<CheckCircle2 size={16} />}
+        />
+        <StatCard
+          staggerIndex={4}
+          tone={totalPendingReceivableCop > 0 ? 'warning' : 'default'}
+          label="Recaudo vs Por Cobrar"
+          value={formatCOP(totalCollectedCop)}
+          sub={`Por cobrar: ${formatCOP(totalPendingReceivableCop)}`}
+          icon={<CreditCard size={16} />}
+        />
+      </section>
 
       {/* MODAL / PANEL DE CREACIÓN O EDICIÓN DE PEDIDO MULTIPROPIETARIO */}
       {showOrderBuilder && (

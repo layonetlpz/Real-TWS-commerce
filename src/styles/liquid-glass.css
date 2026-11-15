@@ -1,0 +1,368 @@
+/* ==========================================================================
+   REAL TWS COMMERCE SYSTEM — APPLE LIQUID GLASS DESIGN TOKENS & MOTION
+   Identidad Premium: Negro Obsidiana · Blanco Perla · Dorado Champagne
+   ========================================================================== */
+
+:root {
+  /* Marca REAL TWS */
+  --rtw-obsidian: #0b0f17;
+  --rtw-black-deep: #0f141c;
+  --rtw-black-charcoal: #151c27;
+  --rtw-black-elevated: #1e2736;
+  --rtw-black-obsidian: #0b0f17;
+
+  --rtw-gold-primary: #d4af37;
+  --rtw-gold-bright: #e8c766;
+  --rtw-gold-hover: #be9824;
+  --rtw-gold-ink: #846205;
+  --rtw-gold-soft: rgba(212, 175, 55, 0.14);
+  --rtw-gold-border: rgba(212, 175, 55, 0.36);
+  --rtw-gold-glow: rgba(212, 175, 55, 0.22);
+
+  /* Canvas y Superficies Sólidas Base (Fallback & Contraste) */
+  --rtw-bg-canvas: #eef2f7;
+  --rtw-bg-main: #eef2f7;
+  --rtw-bg-surface: rgba(255, 255, 255, 0.78);
+  --rtw-bg-surface-solid: #ffffff;
+  --rtw-bg-subtle: rgba(248, 250, 252, 0.72);
+  --rtw-bg-input: rgba(255, 255, 255, 0.86);
+  --rtw-bg-calculated: rgba(241, 245, 249, 0.85);
+
+  /* Liquid Glass — Capas Translúcidas */
+  --glass-bg-1: rgba(255, 255, 255, 0.72);
+  --glass-bg-2: rgba(255, 255, 255, 0.84);
+  --glass-bg-3: rgba(255, 255, 255, 0.92);
+  --glass-bg-subtle: rgba(248, 250, 252, 0.62);
+  --glass-bg-dark: rgba(13, 17, 25, 0.84);
+  --glass-bg-dark-elevated: rgba(21, 28, 39, 0.88);
+  --glass-bg-modal: rgba(255, 255, 255, 0.90);
+
+  /* Liquid Glass — Desenfoques & Saturación (Presupuesto optimizado GPU) */
+  --glass-blur-sm: blur(12px) saturate(155%);
+  --glass-blur-md: blur(20px) saturate(175%);
+  --glass-blur-lg: blur(28px) saturate(185%);
+
+  /* Bordes Especulares e Iluminación Ambiental */
+  --glass-border-light: rgba(255, 255, 255, 0.78);
+  --glass-border-outer: rgba(15, 23, 42, 0.08);
+  --glass-border-dark: rgba(255, 255, 255, 0.12);
+  --glass-specular-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.92);
+  --glass-specular-dark: inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  --glass-specular-gold: inset 0 1px 0 0 rgba(232, 199, 102, 0.38);
+
+  /* Sombras Multicapa Apple-grade */
+  --glass-shadow-xs:
+    0 1px 2px rgba(15, 20, 28, 0.04),
+    0 1px 1px rgba(15, 20, 28, 0.02);
+  --glass-shadow-sm:
+    0 4px 16px -4px rgba(15, 20, 28, 0.06),
+    0 1px 3px rgba(15, 20, 28, 0.04),
+    var(--glass-specular-top);
+  --glass-shadow-md:
+    0 14px 36px -10px rgba(15, 20, 28, 0.12),
+    0 4px 12px -2px rgba(15, 20, 28, 0.05),
+    var(--glass-specular-top);
+  --glass-shadow-lg:
+    0 24px 56px -14px rgba(11, 15, 23, 0.22),
+    0 8px 20px -6px rgba(11, 15, 23, 0.09),
+    var(--glass-specular-top);
+  --glass-shadow-dark:
+    0 18px 44px -12px rgba(5, 8, 14, 0.42),
+    0 4px 12px rgba(5, 8, 14, 0.22),
+    var(--glass-specular-dark);
+
+  /* Tipografía */
+  --rtw-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  --rtw-font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+  --rtw-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Texto y Contraste WCAG AA+ */
+  --rtw-text-primary: #0f172a;
+  --rtw-text-secondary: #475569;
+  --rtw-text-muted: #64748b;
+  --rtw-text-on-dark: #f8fafc;
+  --rtw-text-on-dark-muted: #cbd5e1;
+
+  --rtw-border-light: rgba(15, 23, 42, 0.09);
+  --rtw-border-strong: rgba(15, 23, 42, 0.16);
+
+  /* Estados Semánticos */
+  --rtw-success-bg: rgba(220, 252, 231, 0.84);
+  --rtw-success-text: #15803d;
+  --rtw-success-border: rgba(34, 197, 94, 0.28);
+
+  --rtw-warning-bg: rgba(254, 243, 199, 0.86);
+  --rtw-warning-text: #92400e;
+  --rtw-warning-border: rgba(217, 119, 6, 0.30);
+
+  --rtw-danger-bg: rgba(254, 226, 226, 0.86);
+  --rtw-danger-text: #b91c1c;
+  --rtw-danger-border: rgba(239, 68, 68, 0.28);
+
+  --rtw-info-bg: rgba(224, 242, 254, 0.86);
+  --rtw-info-text: #0369a1;
+  --rtw-info-border: rgba(14, 165, 233, 0.28);
+
+  /* Curvas de Movimiento Apple Spring */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Dimensiones */
+  --rtw-sidebar-width: 266px;
+  --rtw-sidebar-collapsed: 78px;
+  --rtw-header-height: 68px;
+  --rtw-radius-xs: 8px;
+  --rtw-radius-sm: 10px;
+  --rtw-radius-md: 16px;
+  --rtw-radius-lg: 22px;
+  --rtw-radius-xl: 28px;
+  --rtw-shadow-xs: var(--glass-shadow-xs);
+  --rtw-shadow-sm: var(--glass-shadow-sm);
+  --rtw-shadow-md: var(--glass-shadow-md);
+
+  /* Alias de compatibilidad para módulos heredados (cero variables rotas) */
+  --accent-gold: var(--rtw-gold-ink);
+  --bg-surface: var(--glass-bg-2);
+  --bg-elevated: var(--glass-bg-3);
+  --border-subtle: var(--rtw-border-light);
+  --text-secondary: var(--rtw-text-secondary);
+  --text-muted: var(--rtw-text-muted);
+  --status-success: var(--rtw-success-text);
+  --status-warning: var(--rtw-warning-text);
+  --status-danger: var(--rtw-danger-text);
+}
+
+/* ================= KEYFRAMES DE MOVIMIENTO ================= */
+
+@keyframes rtw-module-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rtw-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rtw-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rtw-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rtw-drawer-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes rtw-dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rtw-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes rtw-shimmer {
+  0% {
+    background-position: -480px 0;
+  }
+  100% {
+    background-position: 480px 0;
+  }
+}
+
+@keyframes rtw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rtw-pulse-soft {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.92);
+  }
+}
+
+/* ================= UTILIDADES LIQUID GLASS ================= */
+
+.rtw-glass {
+  background: var(--glass-bg-1);
+  backdrop-filter: var(--glass-blur-md);
+  -webkit-backdrop-filter: var(--glass-blur-md);
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-sm);
+}
+
+.rtw-glass-elevated {
+  background: var(--glass-bg-2);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-md);
+}
+
+.rtw-glass-dark {
+  background: linear-gradient(
+    145deg,
+    rgba(13, 17, 25, 0.92) 0%,
+    rgba(24, 32, 46, 0.86) 55%,
+    rgba(16, 21, 31, 0.92) 100%
+  );
+  backdrop-filter: var(--glass-blur-md);
+  -webkit-backdrop-filter: var(--glass-blur-md);
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  box-shadow: var(--glass-shadow-dark);
+  color: var(--rtw-text-on-dark);
+}
+
+.rtw-glass-interactive {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.26s var(--ease-spring),
+    box-shadow 0.26s var(--ease-spring),
+    border-color 0.22s var(--ease-smooth);
+}
+
+.rtw-glass-interactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease-smooth);
+  background: radial-gradient(
+    420px circle at var(--mouse-x, 50%) var(--mouse-y, 0%),
+    rgba(212, 175, 55, 0.13),
+    rgba(255, 255, 255, 0.24) 38%,
+    transparent 70%
+  );
+}
+
+.rtw-glass-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--glass-shadow-md);
+  border-color: rgba(212, 175, 55, 0.34);
+}
+
+.rtw-glass-interactive:hover::after {
+  opacity: 1;
+}
+
+.rtw-spin {
+  animation: rtw-spin 0.9s linear infinite;
+}
+
+.rtw-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22);
+  display: inline-block;
+  animation: rtw-pulse-soft 2.2s ease-in-out infinite;
+}
+
+.rtw-stagger-1 { animation: rtw-card-reveal 0.38s var(--ease-spring) both; animation-delay: 20ms; }
+.rtw-stagger-2 { animation: rtw-card-reveal 0.38s var(--ease-spring) both; animation-delay: 60ms; }
+.rtw-stagger-3 { animation: rtw-card-reveal 0.38s var(--ease-spring) both; animation-delay: 100ms; }
+.rtw-stagger-4 { animation: rtw-card-reveal 0.38s var(--ease-spring) both; animation-delay: 140ms; }
+.rtw-stagger-5 { animation: rtw-card-reveal 0.38s var(--ease-spring) both; animation-delay: 180ms; }
+
+/* ================= FALLBACK SIN BACKDROP-FILTER ================= */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-bg-1: #ffffff;
+    --glass-bg-2: #ffffff;
+    --glass-bg-3: #ffffff;
+    --glass-bg-subtle: #f8fafc;
+    --glass-bg-dark: #111722;
+    --glass-bg-dark-elevated: #18202f;
+    --glass-bg-modal: #ffffff;
+  }
+
+  .rtw-glass,
+  .rtw-glass-elevated,
+  .rtw-top-header,
+  .rtw-card,
+  .card,
+  .rtw-kpi-card,
+  .kpi-card,
+  .rtw-modal,
+  .rtw-drawer,
+  .rtw-dropdown-menu {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .rtw-sidebar,
+  .rtw-glass-dark,
+  .rtw-toast {
+    background: #111722 !important;
+  }
+}
+
+/* ================= ACCESIBILIDAD: MOVIMIENTO REDUCIDO ================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -7,7 +7,6 @@ import {
   Landmark,
   ShieldCheck,
   AlertTriangle,
-  Lock,
   Play,
   Download,
   CheckCircle2,
@@ -35,6 +34,7 @@ import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
+import { ModuleHeader, SegmentedTabs, StatCard } from '../../components/glass';
 
 export type FinanceSectionTab =
   | 'COSTS'
@@ -440,14 +440,15 @@ export function FinancialAccountingModule({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="module-container">
       {/* BANNER SUPERIOR DE ALERTA CUANDO FALTA ACUERDO CONFIGURADO */}
       {activeOwnerStatement?.agreementIsPending && (
         <div
           className="rtw-card"
           style={{
-            background: '#fffbeb',
-            border: '2px solid #f59e0b',
+            background: 'var(--rtw-warning-bg)',
+            border: '1px solid var(--rtw-warning-border)',
+            borderLeft: '4px solid var(--rtw-gold-primary)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -456,206 +457,113 @@ export function FinancialAccountingModule({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <AlertTriangle size={22} color="#b45309" />
+            <AlertTriangle size={20} color="var(--rtw-warning-text)" />
             <div>
-              <div style={{ fontWeight: 800, color: '#92400e', fontSize: '0.94rem' }}>
-                ESTADO DEL ACUERDO ({activeOwnerStatement.ownerId} — {activeOwnerStatement.ownerName}):{' '}
-                <span className="rtw-badge rtw-badge-warning">PENDIENTE DE CONFIGURAR</span>
+              <div style={{ fontWeight: 700, color: 'var(--rtw-warning-text)', fontSize: '0.92rem' }}>
+                Acuerdo pendiente de configurar ({activeOwnerStatement.ownerId} · {activeOwnerStatement.ownerName})
               </div>
               <div style={{ fontSize: '0.8rem', color: '#78350f' }}>
-                Regla Crítica Aplicada: El sistema no inventa porcentajes de comisión ni liquida automáticamente. Mientras el acuerdo esté en <strong>PENDIENTE DE CONFIGURAR</strong>, las liquidaciones están bloqueadas.
+                Define el porcentaje de distribución antes de registrar liquidaciones para este propietario.
               </div>
             </div>
           </div>
           <button
             type="button"
-            className="rtw-btn rtw-btn-primary"
+            className="rtw-btn rtw-btn-primary btn-sm"
             onClick={() => setActiveTab('OWNERS_AGREEMENTS_STATEMENT')}
           >
-            Configurar Acuerdo Comercial
+            Configurar acuerdo
           </button>
         </div>
       )}
 
       {/* CABECERA EJECUTIVA Y NAVEGADOR FINANCIERO */}
-      <section
-        className="rtw-card"
-        style={{
-          background: 'linear-gradient(135deg, #0f141c 0%, #1b2433 100%)',
-          color: '#f8fafc',
-          border: '1px solid rgba(212, 175, 55, 0.38)'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '14px'
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <span className="rtw-badge rtw-badge-gold">
-                CONTABILIDAD MULTIPROPIETARIO Y COSTOS
-              </span>
-              <span style={{ fontSize: '0.76rem', color: '#cbd5e1' }}>
-                <Lock size={13} color="#d4af37" style={{ verticalAlign: 'middle' }} /> Historial Inmutable · Cero Porcentajes Inventados · Sin Liquidación ni Pago Automático
-              </span>
-            </div>
-            <h2 style={{ fontSize: '1.22rem', fontWeight: 800, color: '#ffffff' }}>
-              Contabilidad Multipropietario, Costos por Lote, Simulador de Precios, Gastos y Liquidaciones
-            </h2>
-            <p style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '4px', maxWidth: '840px' }}>
-              Separa utilidad atribuible devengada de dinero efectivamente cobrado, prorratea descuentos y
-              devoluciones de forma documentada, bloquea criterios de gastos no aprobados y verifica todas
-              las fórmulas financieras.
-            </p>
-          </div>
-
+      <ModuleHeader
+        variant="dark"
+        eyebrow="FINANZAS · CONTABILIDAD MULTIPROPIETARIO"
+        title="Costos, Precios, Propietarios y Liquidaciones"
+        subtitle="Control de costos por lote, márgenes comerciales, gastos y estados de cuenta por propietario."
+        actions={
           <button
             type="button"
+            className="rtw-btn rtw-btn-gold btn-sm"
             onClick={handleExportStatementsCsv}
-            style={{
-              background: '#d4af37',
-              color: '#0f141c',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '9px 14px',
-              fontSize: '0.8rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
           >
-            <Download size={14} /> Exportar Estados de Cuenta (.CSV UTF-8)
+            <Download size={14} /> Exportar CSV
           </button>
-        </div>
-
-        {/* PESTAÑAS FINANCIERAS */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            flexWrap: 'wrap',
-            marginTop: '14px',
-            paddingTop: '12px',
-            borderTop: '1px solid rgba(255,255,255,0.12)'
-          }}
-        >
-          {[
-            { id: 'COSTS' as FinanceSectionTab, label: '1. Costos por Lote', icon: Calculator },
-            {
-              id: 'PRICES_SIMULATOR' as FinanceSectionTab,
-              label: '2. Precios, Historial y Simulador PE',
-              icon: Tag
-            },
-            {
-              id: 'EXPENSES' as FinanceSectionTab,
-              label: `3. Gastos Directos y Compartidos (${finState.expenses.length})`,
-              icon: Receipt
-            },
-            {
-              id: 'OWNERS_AGREEMENTS_STATEMENT' as FinanceSectionTab,
-              label: '4. Propietarios, Acuerdos y Estado de Cuenta',
-              icon: Users
-            },
-            {
-              id: 'SETTLEMENTS' as FinanceSectionTab,
-              label: `5. Liquidaciones Conciliadas (${finState.settlements.length})`,
-              icon: Landmark
-            },
-            {
-              id: 'TESTS_8' as FinanceSectionTab,
-              label: '6. Batería de 8 Pruebas Financieras',
-              icon: ShieldCheck
-            }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  background: active ? '#d4af37' : 'rgba(255,255,255,0.06)',
-                  color: active ? '#0f141c' : '#e2e8f0',
-                  border: active ? '1px solid #d4af37' : '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  fontWeight: active ? 800 : 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Icon size={14} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+        }
+        bottomSlot={
+          <SegmentedTabs<FinanceSectionTab>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { id: 'COSTS', label: 'Costos', icon: <Calculator size={14} /> },
+              { id: 'PRICES_SIMULATOR', label: 'Precios', icon: <Tag size={14} /> },
+              {
+                id: 'EXPENSES',
+                label: 'Gastos',
+                icon: <Receipt size={14} />,
+                count: finState.expenses.length
+              },
+              { id: 'OWNERS_AGREEMENTS_STATEMENT', label: 'Propietarios', icon: <Users size={14} /> },
+              {
+                id: 'SETTLEMENTS',
+                label: 'Liquidaciones',
+                icon: <Landmark size={14} />,
+                count: finState.settlements.length
+              },
+              { id: 'TESTS_8', label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }
+            ]}
+          />
+        }
+      />
 
       {/* KPIS FINANCIEROS MULTIPROPIETARIO */}
       {activeOwnerStatement && (
         <section className="rtw-kpi-grid">
-          <div className="rtw-kpi-card">
-            <div className="rtw-kpi-label">Ventas Netas Despachadas</div>
-            <div className="rtw-kpi-value">{formatCOP(activeOwnerStatement.netSalesCop)}</div>
-            <div className="rtw-kpi-sub">
-              {activeOwnerStatement.netUnitsSold} unid. vendidas netas ({activeOwnerStatement.ownerId})
-            </div>
-          </div>
-          <div className="rtw-kpi-card">
-            <div className="rtw-kpi-label">Costo Vendido (COGS por Lote)</div>
-            <div className="rtw-kpi-value">{formatCOP(activeOwnerStatement.cogsSoldCop)}</div>
-            <div className="rtw-kpi-sub">
-              Utilidad Bruta: {formatCOP(activeOwnerStatement.grossProfitCop)}
-            </div>
-          </div>
-          <div className="rtw-kpi-card">
-            <div className="rtw-kpi-label">Comisión REAL TWS</div>
-            <div className="rtw-kpi-value" style={{ fontSize: '1.05rem', color: '#b45309' }}>
-              {activeOwnerStatement.storeCommissionCop === null
-                ? 'PENDIENTE DE CONFIGURAR'
-                : formatCOP(activeOwnerStatement.storeCommissionCop)}
-            </div>
-            <div className="rtw-kpi-sub">
-              Gastos totales asignados: {formatCOP(activeOwnerStatement.totalExpensesCop)}
-            </div>
-          </div>
-          <div className="rtw-kpi-card">
-            <div className="rtw-kpi-label">Utilidad Devengada vs Dinero Cobrado</div>
-            <div className="rtw-kpi-value" style={{ color: '#166534' }}>
-              {formatCOP(activeOwnerStatement.attributableNetProfitCop)}
-            </div>
-            <div className="rtw-kpi-sub">
-              Cobrado en caja: {formatCOP(activeOwnerStatement.collectedCashFromSalesCop)} · Cartera:{' '}
-              {formatCOP(activeOwnerStatement.uncollectedReceivablesCop)}
-            </div>
-          </div>
-          <div className="rtw-kpi-card">
-            <div className="rtw-kpi-label">Saldo Final Conciliado</div>
-            <div
-              className="rtw-kpi-value"
-              style={{
-                color:
-                  activeOwnerStatement.finalConciliatedBalanceCop < 0 ? '#b91c1c' : '#0f172a'
-              }}
-            >
-              {formatCOP(activeOwnerStatement.finalConciliatedBalanceCop)}
-            </div>
-            <div className="rtw-kpi-sub">
-              Pagos anteriores: {formatCOP(activeOwnerStatement.previousSettledPaymentsCop)}
-            </div>
-          </div>
+          <StatCard
+            staggerIndex={1}
+            label="Ventas Netas"
+            value={formatCOP(activeOwnerStatement.netSalesCop)}
+            sub={`${activeOwnerStatement.netUnitsSold} u. (${activeOwnerStatement.ownerId})`}
+            icon={<Tag size={16} />}
+          />
+          <StatCard
+            staggerIndex={2}
+            label="Costo Vendido (COGS)"
+            value={formatCOP(activeOwnerStatement.cogsSoldCop)}
+            sub={`Utilidad bruta: ${formatCOP(activeOwnerStatement.grossProfitCop)}`}
+            icon={<Calculator size={16} />}
+          />
+          <StatCard
+            staggerIndex={3}
+            tone="warning"
+            label="Comisión REAL TWS"
+            value={
+              activeOwnerStatement.storeCommissionCop === null
+                ? 'Por configurar'
+                : formatCOP(activeOwnerStatement.storeCommissionCop)
+            }
+            sub={`Gastos asignados: ${formatCOP(activeOwnerStatement.totalExpensesCop)}`}
+            icon={<Receipt size={16} />}
+          />
+          <StatCard
+            staggerIndex={4}
+            tone="success"
+            label="Utilidad Neta"
+            value={formatCOP(activeOwnerStatement.attributableNetProfitCop)}
+            sub={`Cobrado: ${formatCOP(activeOwnerStatement.collectedCashFromSalesCop)} · Cartera: ${formatCOP(activeOwnerStatement.uncollectedReceivablesCop)}`}
+            icon={<CheckCircle2 size={16} />}
+          />
+          <StatCard
+            staggerIndex={5}
+            tone={activeOwnerStatement.finalConciliatedBalanceCop < 0 ? 'danger' : 'gold'}
+            label="Saldo Conciliado"
+            value={formatCOP(activeOwnerStatement.finalConciliatedBalanceCop)}
+            sub={`Pagos previos: ${formatCOP(activeOwnerStatement.previousSettledPaymentsCop)}`}
+            icon={<Landmark size={16} />}
+          />
         </section>
       )}
 
@@ -663,7 +571,7 @@ export function FinancialAccountingModule({
           PESTAÑA 1: COSTOS POR LOTE (COMPRA, TRANSPORTE, OTROS, EMPAQUE, PUBLICIDAD)
          ===================================================================== */}
       {activeTab === 'COSTS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.65fr 1fr', gap: '16px' }}>
+        <div className="rtw-split-grid">
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '6px' }}>
               Estructura Completa de Costos por Lote y Propietario ({lotBreakdowns.length})

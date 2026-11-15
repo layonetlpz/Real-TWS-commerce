@@ -6,6 +6,7 @@ import {
   requestPasswordRecovery,
   updateAuthenticatedUserPassword
 } from '../../services/authService';
+import { SegmentedTabs } from '../../components/glass';
 
 type AuthMode = 'LOGIN' | 'RECOVERY' | 'UPDATE_PASSWORD';
 
@@ -36,15 +37,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
     if (error) {
       setErrorMessage(error);
-      notify('error', 'Autenticación Rechazada', error);
+      notify('error', 'No se pudo iniciar sesión', error);
       return;
     }
 
-    notify(
-      'success',
-      'Sesión Iniciada',
-      'Autenticación verificada mediante Supabase Auth y perfil RLS.'
-    );
+    notify('success', 'Bienvenido a REAL TWS', 'Sesión iniciada correctamente.');
   };
 
   const handleRecoverySubmit = async (e: React.FormEvent) => {
@@ -58,14 +55,13 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
     if (error) {
       setErrorMessage(error);
-      notify('error', 'Error en Recuperación', error);
+      notify('error', 'No se pudo enviar el enlace', error);
       return;
     }
 
-    const msg =
-      'Se ha enviado el enlace de recuperación de contraseña al correo indicado mediante Supabase Auth.';
+    const msg = 'Te enviamos un enlace a tu correo para restablecer tu contraseña.';
     setFeedbackMessage(msg);
-    notify('info', 'Correo de Recuperación Enviado', msg);
+    notify('info', 'Enlace enviado', msg);
   };
 
   const handleUpdatePasswordSubmit = async (e: React.FormEvent) => {
@@ -83,104 +79,87 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
       return;
     }
 
-    const msg = 'Contraseña actualizada correctamente en Supabase Auth.';
+    const msg = 'Tu contraseña se actualizó correctamente.';
     setFeedbackMessage(msg);
     setNewPassword('');
-    notify('success', 'Contraseña Actualizada', msg);
+    notify('success', 'Contraseña actualizada', msg);
   };
 
   return (
-    <div
-      className="rtw-card rtw-card-gold-top"
-      style={{ maxWidth: '540px', margin: '0 auto' }}
-    >
+    <div className="rtw-card rtw-auth-card rtw-glass-elevated rtw-card-gold-top">
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '8px',
-          marginBottom: '12px'
+          gap: '10px',
+          marginBottom: '14px'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ShieldCheck size={22} color="#d4af37" />
-          <h2 style={{ fontSize: '1.08rem', fontWeight: 800, color: '#111827' }}>
-            {mode === 'LOGIN' && 'Acceso Oficial — REAL TWS Supabase Auth'}
-            {mode === 'RECOVERY' && 'Recuperación de Contraseña'}
-            {mode === 'UPDATE_PASSWORD' && 'Actualizar Contraseña de Seguridad'}
-          </h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '12px',
+              background: 'linear-gradient(145deg, #161d29, #0b0f17)',
+              border: '1px solid rgba(212, 175, 55, 0.45)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <ShieldCheck size={20} color="#e8c766" />
+          </span>
+          <div>
+            <h2 style={{ fontSize: '1.14rem', fontWeight: 800, color: 'var(--rtw-text-primary)' }}>
+              {mode === 'LOGIN' && 'Iniciar sesión'}
+              {mode === 'RECOVERY' && 'Recuperar acceso'}
+              {mode === 'UPDATE_PASSWORD' && 'Nueva contraseña'}
+            </h2>
+            <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
+              {mode === 'LOGIN' && 'Accede a tu espacio de trabajo REAL TWS.'}
+              {mode === 'RECOVERY' && 'Ingresa tu correo para recibir instrucciones.'}
+              {mode === 'UPDATE_PASSWORD' && 'Elige una contraseña segura (mínimo 8 caracteres).'}
+            </p>
+          </div>
         </div>
 
         <span
-          className={`rtw-badge ${
-            isSupabaseReady ? 'rtw-badge-success' : 'rtw-badge-warning'
-          }`}
+          className={`rtw-badge ${isSupabaseReady ? 'rtw-badge-success' : 'rtw-badge-warning'}`}
         >
-          {isSupabaseReady
-            ? 'Supabase Auth Conectado'
-            : 'Pendiente .env.local (Sin claves en código)'}
+          {isSupabaseReady ? 'Listo' : 'Sin conexión'}
         </span>
       </div>
 
-      <p style={{ fontSize: '0.82rem', color: '#475569', marginBottom: '14px' }}>
-        Seguridad estricta: <strong>Cero usuarios o contraseñas ficticias en producción</strong> y{' '}
-        <strong>cero llaves secretas en el código fuente</strong>. Toda sesión valida su rol en{' '}
-        <code>public.profiles</code> mediante Row Level Security (RLS).
-      </p>
-
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className={`rtw-btn ${mode === 'LOGIN' ? 'rtw-btn-primary' : 'rtw-btn-outline'}`}
-          onClick={() => {
-            setMode('LOGIN');
+      <div style={{ marginBottom: '18px' }}>
+        <SegmentedTabs<AuthMode>
+          value={mode}
+          onChange={(next) => {
+            setMode(next);
             setErrorMessage(null);
             setFeedbackMessage(null);
           }}
-        >
-          <Lock size={14} />
-          Iniciar Sesión
-        </button>
-        <button
-          type="button"
-          className={`rtw-btn ${mode === 'RECOVERY' ? 'rtw-btn-primary' : 'rtw-btn-outline'}`}
-          onClick={() => {
-            setMode('RECOVERY');
-            setErrorMessage(null);
-            setFeedbackMessage(null);
-          }}
-        >
-          <Mail size={14} />
-          Recuperar Contraseña
-        </button>
-        <button
-          type="button"
-          className={`rtw-btn ${mode === 'UPDATE_PASSWORD' ? 'rtw-btn-primary' : 'rtw-btn-outline'}`}
-          onClick={() => {
-            setMode('UPDATE_PASSWORD');
-            setErrorMessage(null);
-            setFeedbackMessage(null);
-          }}
-        >
-          <KeyRound size={14} />
-          Cambiar Contraseña
-        </button>
+          items={[
+            { id: 'LOGIN', label: 'Entrar', icon: <Lock size={13} /> },
+            { id: 'RECOVERY', label: 'Recuperar', icon: <Mail size={13} /> },
+            { id: 'UPDATE_PASSWORD', label: 'Nueva clave', icon: <KeyRound size={13} /> }
+          ]}
+        />
       </div>
 
       {mode === 'LOGIN' && (
         <form onSubmit={handleLoginSubmit} noValidate>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div className="rtw-field">
               <label className="rtw-label" htmlFor="auth-login-email">
-                Correo Electrónico Corporativo *
+                Correo electrónico
               </label>
               <input
                 id="auth-login-email"
                 type="email"
                 className="rtw-input"
-                placeholder="usuario@realtws.com"
+                placeholder="nombre@realtws.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
@@ -190,7 +169,7 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
             <div className="rtw-field">
               <label className="rtw-label" htmlFor="auth-login-password">
-                Contraseña *
+                Contraseña
               </label>
               <input
                 id="auth-login-password"
@@ -207,10 +186,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
             <button
               type="submit"
               className="rtw-btn rtw-btn-primary"
+              style={{ width: '100%', marginTop: '4px' }}
               disabled={submitting}
             >
               <Lock size={15} />
-              {submitting ? 'Autenticando en Supabase...' : 'Iniciar Sesión Persistente'}
+              {submitting ? 'Ingresando...' : 'Continuar'}
             </button>
           </div>
         </form>
@@ -218,16 +198,16 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
       {mode === 'RECOVERY' && (
         <form onSubmit={handleRecoverySubmit} noValidate>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div className="rtw-field">
               <label className="rtw-label" htmlFor="auth-recovery-email">
-                Correo Electrónico Registrado *
+                Correo registrado
               </label>
               <input
                 id="auth-recovery-email"
                 type="email"
                 className="rtw-input"
-                placeholder="usuario@realtws.com"
+                placeholder="nombre@realtws.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -237,12 +217,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
             <button
               type="submit"
               className="rtw-btn rtw-btn-primary"
+              style={{ width: '100%' }}
               disabled={submitting}
             >
               <Mail size={15} />
-              {submitting
-                ? 'Enviando enlace...'
-                : 'Enviar Enlace de Recuperación (Supabase Auth)'}
+              {submitting ? 'Enviando...' : 'Enviar enlace'}
             </button>
           </div>
         </form>
@@ -250,16 +229,16 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
       {mode === 'UPDATE_PASSWORD' && (
         <form onSubmit={handleUpdatePasswordSubmit} noValidate>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div className="rtw-field">
               <label className="rtw-label" htmlFor="auth-new-password">
-                Nueva Contraseña (Mínimo 8 caracteres) *
+                Nueva contraseña
               </label>
               <input
                 id="auth-new-password"
                 type="password"
                 className="rtw-input"
-                placeholder="Nueva contraseña segura"
+                placeholder="Mínimo 8 caracteres"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
@@ -269,10 +248,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
             <button
               type="submit"
               className="rtw-btn rtw-btn-primary"
+              style={{ width: '100%' }}
               disabled={submitting}
             >
               <KeyRound size={15} />
-              {submitting ? 'Actualizando...' : 'Confirmar Nueva Contraseña'}
+              {submitting ? 'Guardando...' : 'Actualizar contraseña'}
             </button>
           </div>
         </form>
@@ -283,11 +263,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
           style={{
             marginTop: '14px',
             padding: '10px 12px',
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: '6px',
-            color: '#991b1b',
-            fontSize: '0.8rem',
+            backgroundColor: 'var(--rtw-danger-bg)',
+            border: '1px solid var(--rtw-danger-border)',
+            borderRadius: '10px',
+            color: 'var(--rtw-danger-text)',
+            fontSize: '0.82rem',
             fontWeight: 600
           }}
         >
@@ -300,11 +280,11 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
           style={{
             marginTop: '14px',
             padding: '10px 12px',
-            backgroundColor: '#dcfce7',
-            border: '1px solid #86efac',
-            borderRadius: '6px',
-            color: '#166534',
-            fontSize: '0.8rem',
+            backgroundColor: 'var(--rtw-success-bg)',
+            border: '1px solid var(--rtw-success-border)',
+            borderRadius: '10px',
+            color: 'var(--rtw-success-text)',
+            fontSize: '0.82rem',
             fontWeight: 600,
             display: 'flex',
             alignItems: 'center',

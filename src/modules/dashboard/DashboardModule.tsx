@@ -14,11 +14,15 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
-  CheckCircle2,
+  DollarSign,
+  Eye,
   FileSpreadsheet,
+  MoreHorizontal,
+  Package,
   PackageCheck,
   RefreshCw,
   ShoppingCart,
+  TrendingUp,
   Truck
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -34,6 +38,14 @@ import { formatCOP, formatDateDDMMYYYY, formatInteger } from '../../utils/format
 import { DataTable } from '../../components/DataTable';
 import { FilterBar } from '../../components/FilterBar';
 import { ErrorState, LoadingState } from '../../components/StatusStates';
+import {
+  GlassCard,
+  GlassDrawer,
+  GlassDropdown,
+  ModuleHeader,
+  SegmentedTabs,
+  StatCard
+} from '../../components/glass';
 import type { TableColumn } from '../../types/domain';
 
 type PeriodFilter = 'ALL' | '30D' | '7D';
@@ -50,6 +62,7 @@ export function DashboardModule() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [selectedLot, setSelectedLot] = useState<DbAvailableInventoryRow | null>(null);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -103,7 +116,7 @@ export function DashboardModule() {
 
     for (const row of snapshot.inventoryRows) {
       const current = byOwner.get(row.owner_id) ?? {
-        ownerLabel: `${row.owner_id} (${row.owner_name})`,
+        ownerLabel: `${row.owner_name}`,
         physicalUnits: 0,
         availableUnits: 0,
         pendingInspection: 0
@@ -121,7 +134,10 @@ export function DashboardModule() {
     return snapshot.inventoryRows.filter((row) => {
       if (statusFilter === 'AVAILABLE' && row.qty_available <= 0) return false;
       if (statusFilter === 'PENDING_INSPECTION' && row.qty_pending_inspection <= 0) return false;
-      if (statusFilter === 'LOW_STOCK' && (row.qty_available > lowStockThreshold || row.qty_physical === 0)) {
+      if (
+        statusFilter === 'LOW_STOCK' &&
+        (row.qty_available > lowStockThreshold || row.qty_physical === 0)
+      ) {
         return false;
       }
       if (statusFilter === 'PENDING_COST' && row.effective_unit_cost_cop !== null) return false;
@@ -142,15 +158,16 @@ export function DashboardModule() {
   const inventoryColumns: TableColumn<DbAvailableInventoryRow>[] = [
     {
       key: 'sku',
-      header: 'SKU',
-      sortValue: (r) => r.sku,
-      render: (r) => <strong className="rtw-mono">{r.sku}</strong>
-    },
-    {
-      key: 'product',
       header: 'Producto',
-      sortValue: (r) => r.product_name,
-      render: (r) => r.product_name
+      sortValue: (r) => r.sku,
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 700, color: 'var(--rtw-text-primary)' }}>{r.product_name}</div>
+          <div className="rtw-mono" style={{ fontSize: '0.74rem', color: 'var(--rtw-text-muted)' }}>
+            {r.sku} · {r.lot_id}
+          </div>
+        </div>
+      )
     },
     {
       key: 'owner',
@@ -158,15 +175,9 @@ export function DashboardModule() {
       sortValue: (r) => r.owner_name,
       render: (r) => (
         <span className="rtw-badge rtw-badge-gold">
-          {r.owner_id} · {r.owner_name}
+          {r.owner_name}
         </span>
       )
-    },
-    {
-      key: 'lot',
-      header: 'Lote',
-      sortValue: (r) => r.lot_id,
-      render: (r) => <span className="rtw-mono">{r.lot_id}</span>
     },
     {
       key: 'physical',
@@ -191,36 +202,40 @@ export function DashboardModule() {
       )
     },
     {
-      key: 'pending',
-      header: 'En Revisión',
-      align: 'right',
-      sortValue: (r) => r.qty_pending_inspection,
-      render: (r) => <span className="rtw-num">{formatInteger(r.qty_pending_inspection)}</span>
-    },
-    {
       key: 'cost',
-      header: 'Costo Unit. COP',
+      header: 'Costo Unit.',
       align: 'right',
       sortValue: (r) => r.effective_unit_cost_cop ?? -1,
       render: (r) =>
         r.effective_unit_cost_cop === null ? (
-          <span className="rtw-badge rtw-badge-warning">Costo Pendiente</span>
+          <span className="rtw-badge rtw-badge-warning">Pendiente</span>
         ) : (
           <span className="rtw-num">{formatCOP(r.effective_unit_cost_cop)}</span>
         )
+    },
+    {
+      key: 'detail',
+      header: '',
+      align: 'right',
+      hideOnMobile: true,
+      render: (r) => (
+        <button
+          type="button"
+          className="rtw-btn rtw-btn-outline btn-sm"
+          onClick={() => setSelectedLot(r)}
+          title="Ver detalles del lote"
+        >
+          <Eye size={14} />
+          Detalle
+        </button>
+      )
     }
   ];
 
   const incidenceColumns: TableColumn<DbInventoryIncidenceRow>[] = [
     {
-      key: 'id',
-      header: 'ID',
-      sortValue: (r) => r.id,
-      render: (r) => <strong className="rtw-mono">{r.id}</strong>
-    },
-    {
       key: 'severity',
-      header: 'Severidad',
+      header: 'Nivel',
       sortValue: (r) => r.severity,
       render: (r) => (
         <span
@@ -237,19 +252,21 @@ export function DashboardModule() {
       )
     },
     {
-      key: 'ref',
-      header: 'Referencia / SKU',
-      sortValue: (r) => r.sku_or_owner_ref,
-      render: (r) => <span className="rtw-mono">{r.sku_or_owner_ref}</span>
-    },
-    {
       key: 'description',
-      header: 'Detalle Operativo',
-      render: (r) => r.description
+      header: 'Incidencia',
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{r.description}</div>
+          <div className="rtw-mono" style={{ fontSize: '0.73rem', color: 'var(--rtw-text-muted)' }}>
+            {r.sku_or_owner_ref} · {formatDateDDMMYYYY(r.created_at)}
+          </div>
+        </div>
+      )
     },
     {
       key: 'status',
       header: 'Estado',
+      align: 'right',
       sortValue: (r) => r.status,
       render: (r) => (
         <span
@@ -260,17 +277,11 @@ export function DashboardModule() {
           {r.status}
         </span>
       )
-    },
-    {
-      key: 'date',
-      header: 'Fecha',
-      sortValue: (r) => r.created_at,
-      render: (r) => formatDateDDMMYYYY(r.created_at)
     }
   ];
 
   if (loading && !snapshot) {
-    return <LoadingState label="Consultando métricas en vivo desde Supabase..." />;
+    return <LoadingState label="Cargando resumen ejecutivo..." />;
   }
 
   if (!snapshot) {
@@ -289,136 +300,95 @@ export function DashboardModule() {
   const canSell =
     activeEffectiveRole === 'ADMIN' || activeEffectiveRole === 'SALES_OPERATOR';
 
+  const quickMenuOptions = [
+    ...(canImport
+      ? [
+          {
+            id: 'import',
+            label: 'Importar inventario Excel',
+            icon: <FileSpreadsheet size={14} />,
+            onClick: () => navigate('/operaciones/importacion')
+          },
+          {
+            id: 'purchase',
+            label: 'Nueva compra / recepción',
+            icon: <Truck size={14} />,
+            onClick: () => navigate('/operaciones/recepciones-compras')
+          }
+        ]
+      : []),
+    {
+      id: 'refresh',
+      label: 'Actualizar datos',
+      icon: <RefreshCw size={14} />,
+      onClick: () => void loadDashboard()
+    }
+  ];
+
   return (
     <div className="module-container">
       {/* Cabecera Ejecutiva */}
-      <section
-        className="rtw-card rtw-card-gold-top"
-        style={{
-          background: 'linear-gradient(135deg, #0f141c 0%, #1c2432 100%)',
-          color: '#f8fafc',
-          marginBottom: 0
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '16px'
-          }}
-        >
-          <div>
-            <span className="rtw-badge rtw-badge-gold" style={{ marginBottom: '8px' }}>
-              <CheckCircle2 size={13} />
-              Operación en vivo · Alcance:{' '}
-              {selectedOwnerScope === 'ALL' ? 'Todos los propietarios' : selectedOwnerScope}
-            </span>
-            <h2 style={{ fontSize: '1.26rem', fontWeight: 800, color: '#ffffff' }}>
-              Resumen Ejecutivo REAL TWS
-            </h2>
-            <p style={{ fontSize: '0.86rem', color: '#cbd5e1', maxWidth: '720px', marginTop: '4px' }}>
-              Supervisión centralizada de inventario multipropietario por lote, disponibilidad real para ventas, valorización de costos e incidencias activas.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.07)', padding: '4px', borderRadius: '8px' }}>
-              {(
-                [
-                  { id: 'ALL', label: 'Histórico' },
-                  { id: '30D', label: '30 días' },
-                  { id: '7D', label: '7 días' }
-                ] as const
-              ).map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPeriodFilter(p.id)}
-                  className="rtw-btn btn-sm"
-                  style={{
-                    backgroundColor: periodFilter === p.id ? '#d4af37' : 'transparent',
-                    color: periodFilter === p.id ? '#0f141c' : '#e2e8f0',
-                    borderColor: 'transparent',
-                    fontWeight: 700
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline btn-sm"
-              onClick={() => void loadDashboard()}
-            >
-              <RefreshCw size={14} />
-              Actualizar
-            </button>
-          </div>
-        </div>
-
-        {/* Accesos rápidos operativos */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '16px' }}>
-          <button
-            type="button"
-            className="rtw-btn rtw-btn-gold btn-sm"
-            onClick={() => navigate('/operaciones/inventario')}
-          >
-            <Boxes size={14} />
-            Ir a Inventario y Lotes
-          </button>
-          {canImport && (
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline btn-sm"
-              onClick={() => navigate('/operaciones/importacion')}
-            >
-              <FileSpreadsheet size={14} />
-              Importar Inventario Excel/CSV
-            </button>
-          )}
-          {canImport && (
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline btn-sm"
-              onClick={() => navigate('/operaciones/recepciones-compras')}
-            >
-              <Truck size={14} />
-              Nueva Recepción / Compra
-            </button>
-          )}
-          {canSell && (
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline btn-sm"
-              onClick={() => navigate('/comercial/pedidos')}
-            >
-              <ShoppingCart size={14} />
-              Registrar Pedido
-            </button>
-          )}
-        </div>
-      </section>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="REAL TWS · PANEL GENERAL"
+        badge={
+          <span className="rtw-badge rtw-badge-gold">
+            {selectedOwnerScope === 'ALL' ? 'Vista global' : `Propietario: ${selectedOwnerScope}`}
+          </span>
+        }
+        title="Resumen Ejecutivo"
+        subtitle="Stock disponible para venta, valorización de inventario e incidencias recientes."
+        actions={
+          <>
+            <SegmentedTabs<PeriodFilter>
+              variant="dark"
+              value={periodFilter}
+              onChange={setPeriodFilter}
+              ariaLabel="Periodo de ventas"
+              items={[
+                { id: 'ALL', label: 'Histórico' },
+                { id: '30D', label: '30 días' },
+                { id: '7D', label: '7 días' }
+              ]}
+            />
+            {canSell ? (
+              <button
+                type="button"
+                className="rtw-btn rtw-btn-gold btn-sm"
+                onClick={() => navigate('/comercial/pedidos')}
+              >
+                <ShoppingCart size={14} />
+                Nuevo pedido
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rtw-btn rtw-btn-gold btn-sm"
+                onClick={() => navigate('/operaciones/inventario')}
+              >
+                <Boxes size={14} />
+                Ver inventario
+              </button>
+            )}
+            <GlassDropdown
+              label="Más"
+              icon={<MoreHorizontal size={14} />}
+              variant="ghost-dark"
+              options={quickMenuOptions}
+            />
+          </>
+        }
+      />
 
       {snapshot.errors.length > 0 && (
         <ErrorState
-          message={`Algunas consultas devolvieron alertas de acceso o red: ${snapshot.errors.join(' · ')}`}
+          message={`Algunas consultas reportaron alertas: ${snapshot.errors.join(' · ')}`}
           onRetry={() => void loadDashboard()}
         />
       )}
 
       {hasEmptyDatabase && (
-        <section
-          className="rtw-card"
-          style={{
-            borderLeft: '4px solid #d4af37',
-            backgroundColor: '#fefce8',
-            marginBottom: 0
-          }}
-        >
+        <GlassCard goldAccent>
           <div
             style={{
               display: 'flex',
@@ -429,11 +399,11 @@ export function DashboardModule() {
             }}
           >
             <div>
-              <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
-                Base de datos lista — Aún no hay inventario cargado
+              <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+                Tu inventario aún está vacío
               </h3>
-              <p style={{ fontSize: '0.84rem', color: '#475569', marginTop: '4px' }}>
-                La conexión con Supabase está activa y las tablas están listas, pero todavía no se han registrado propietarios o lotes en producción. Carga tu archivo oficial desde Importación Excel/CSV o registra tu primera compra.
+              <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-secondary)', marginTop: '4px' }}>
+                Importa tu hoja de inventario inicial o registra la primera recepción de mercancía para comenzar.
               </p>
             </div>
             {canImport && (
@@ -443,130 +413,141 @@ export function DashboardModule() {
                 onClick={() => navigate('/operaciones/importacion')}
               >
                 <FileSpreadsheet size={16} />
-                Cargar Inventario Inicial
+                Importar inventario
                 <ArrowRight size={15} />
               </button>
             )}
           </div>
-        </section>
+        </GlassCard>
       )}
 
       {/* KPIs Principales */}
-      <section className="rtw-kpi-grid" style={{ marginBottom: 0 }}>
-        <article className="rtw-kpi-card">
-          <div className="rtw-kpi-label">SKUs & Stock Físico</div>
-          <div className="rtw-kpi-value">{formatInteger(snapshot.totals.physicalUnits)} unid.</div>
-          <div className="rtw-kpi-sub">
-            {formatInteger(snapshot.totals.uniqueSkus)} SKUs activos ·{' '}
-            {formatInteger(snapshot.owners.length)} propietarios
-          </div>
-        </article>
+      <section className="rtw-kpi-grid">
+        <StatCard
+          staggerIndex={1}
+          label="Stock Físico"
+          value={`${formatInteger(snapshot.totals.physicalUnits)} u.`}
+          sub={`${formatInteger(snapshot.totals.uniqueSkus)} SKUs · ${formatInteger(snapshot.owners.length)} propietarios`}
+          icon={<Package size={16} />}
+        />
 
-        <article className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Disponible para Venta</div>
-          <div className="rtw-kpi-value" style={{ color: '#166534' }}>
-            {formatInteger(snapshot.totals.availableUnits)} unid.
-          </div>
-          <div className="rtw-kpi-sub">
-            En revisión: {formatInteger(snapshot.totals.pendingInspectionUnits)} · Reservado:{' '}
-            {formatInteger(snapshot.totals.reservedUnits)}
-          </div>
-        </article>
+        <StatCard
+          staggerIndex={2}
+          tone="success"
+          label="Disponible"
+          value={`${formatInteger(snapshot.totals.availableUnits)} u.`}
+          sub={`${formatInteger(snapshot.totals.pendingInspectionUnits)} en revisión · ${formatInteger(snapshot.totals.reservedUnits)} reserv.`}
+          icon={<PackageCheck size={16} />}
+        />
 
-        <article className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Costo Inventario Activo</div>
-          <div className="rtw-kpi-value">{formatCOP(snapshot.totals.inventoryCostCop)}</div>
-          <div className="rtw-kpi-sub">
-            Calculado solo con costos confirmados por lote
-          </div>
-        </article>
+        <StatCard
+          staggerIndex={3}
+          tone="gold"
+          label="Valor en Costo"
+          value={formatCOP(snapshot.totals.inventoryCostCop)}
+          sub="Según costos confirmados por lote"
+          icon={<DollarSign size={16} />}
+        />
 
-        <article className="rtw-kpi-card">
-          <div className="rtw-kpi-label">
-            Ventas Netas ({periodFilter === 'ALL' ? 'Histórico' : periodFilter})
-          </div>
-          <div className="rtw-kpi-value">{formatCOP(periodSalesCop)}</div>
-          <div className="rtw-kpi-sub">
-            {formatInteger(periodUnitsSold)} unidades vendidas · Utilidad acumulada:{' '}
-            {formatCOP(snapshot.totals.attributableProfitCop)}
-          </div>
-        </article>
+        <StatCard
+          staggerIndex={4}
+          label={`Ventas (${periodFilter === 'ALL' ? 'Histórico' : periodFilter})`}
+          value={formatCOP(periodSalesCop)}
+          sub={`${formatInteger(periodUnitsSold)} u. · Utilidad: ${formatCOP(snapshot.totals.attributableProfitCop)}`}
+          icon={<TrendingUp size={16} />}
+        />
 
-        <article className="rtw-kpi-card">
-          <div className="rtw-kpi-label">Incidencias Abiertas</div>
-          <div
-            className="rtw-kpi-value"
-            style={{
-              color: snapshot.totals.openIncidencesCount > 0 ? '#92400e' : '#166534'
-            }}
-          >
-            {formatInteger(snapshot.totals.openIncidencesCount)}
-          </div>
-          <div className="rtw-kpi-sub">
-            Defectuosas: {formatInteger(snapshot.totals.defectiveUnits)} · Umbral stock bajo: ≤{' '}
-            {lowStockThreshold}
-          </div>
-        </article>
+        <StatCard
+          staggerIndex={5}
+          tone={snapshot.totals.openIncidencesCount > 0 ? 'warning' : 'success'}
+          label="Incidencias"
+          value={formatInteger(snapshot.totals.openIncidencesCount)}
+          sub={`Defectuosas: ${formatInteger(snapshot.totals.defectiveUnits)} · Alerta ≤ ${lowStockThreshold}`}
+          icon={<AlertTriangle size={16} />}
+        />
       </section>
 
-      {/* Gráfico por propietario + Tabla de inventario en vivo */}
+      {/* Gráfico + Incidencias */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
           gap: '18px'
         }}
       >
-        <section className="rtw-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <PackageCheck size={18} color="#d4af37" />
-            <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
-              Distribución de Stock por Propietario
-            </h3>
+        <GlassCard>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+            <div>
+              <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
+                Stock por propietario
+              </h3>
+              <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>
+                Comparativa entre unidades físicas, disponibles y en revisión
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rtw-btn rtw-btn-outline btn-sm"
+              onClick={() => navigate('/operaciones/inventario')}
+            >
+              Ver lotes
+            </button>
           </div>
           {chartByOwner.length === 0 ? (
-            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: '0.84rem' }}>
+            <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--rtw-text-muted)', fontSize: '0.84rem' }}>
               Sin unidades registradas en inventario aún.
             </div>
           ) : (
             <div style={{ width: '100%', height: 270 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartByOwner}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="ownerLabel" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(15, 23, 42, 0.08)" />
+                  <XAxis dataKey="ownerLabel" tick={{ fontSize: 11, fill: '#475569' }} />
+                  <YAxis tick={{ fontSize: 11, fill: '#475569' }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'rgba(13, 17, 25, 0.92)',
+                      border: '1px solid rgba(212, 175, 55, 0.45)',
+                      borderRadius: '12px',
+                      color: '#f8fafc',
+                      fontSize: '12px'
+                    }}
+                  />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Bar dataKey="physicalUnits" name="Físicas" fill="#171e29" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="availableUnits" name="Disponibles" fill="#166534" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="pendingInspection" name="En Revisión" fill="#d4af37" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="physicalUnits" name="Físicas" fill="#151c27" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="availableUnits" name="Disponibles" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="pendingInspection" name="En Revisión" fill="#d4af37" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
-        </section>
+        </GlassCard>
 
-        <section className="rtw-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <AlertTriangle size={18} color="#92400e" />
-            <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
-              Incidencias Operativas ({snapshot.incidences.length})
-            </h3>
+        <GlassCard>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+            <div>
+              <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
+                Incidencias recientes ({snapshot.incidences.length})
+              </h3>
+              <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>
+                Novedades de calidad, costos o conciliación
+              </p>
+            </div>
           </div>
           <DataTable
             columns={incidenceColumns}
             data={snapshot.incidences}
             rowKey={(row) => row.id}
-            pageSize={6}
-            mobileTitle={(row) => `${row.id} · ${row.severity}`}
-            emptyTitle="Sin incidencias abiertas"
-            emptyDescription="No se reportan hallazgos pendientes de revisión en el alcance seleccionado."
+            pageSize={5}
+            mobileTitle={(row) => `${row.severity} · ${row.sku_or_owner_ref}`}
+            emptyTitle="Todo en orden"
+            emptyDescription="No hay incidencias pendientes en este alcance."
           />
-        </section>
+        </GlassCard>
       </div>
 
-      {/* Tabla detallada de inventario vivo por lote y propietario */}
-      <section className="rtw-card" style={{ marginBottom: 0 }}>
+      {/* Tabla consolidada de inventario */}
+      <GlassCard>
         <div
           style={{
             display: 'flex',
@@ -574,15 +555,15 @@ export function DashboardModule() {
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: '8px',
-            marginBottom: '12px'
+            marginBottom: '14px'
           }}
         >
           <div>
-            <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
-              Inventario Consolidado por Lote y Propietario ({filteredInventory.length})
+            <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+              Inventario por lote ({filteredInventory.length})
             </h3>
-            <p style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              Haz clic en cualquier encabezado de columna para ordenar. Las unidades en revisión no están habilitadas para la venta.
+            <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
+              Ordena por columna o abre cualquier lote para ver su desglose completo.
             </p>
           </div>
         </div>
@@ -592,7 +573,7 @@ export function DashboardModule() {
           onSearchChange={setSearchQuery}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
-          placeholder="Buscar por SKU, producto, lote o propietario..."
+          placeholder="Buscar SKU, producto, lote o propietario..."
           statusOptions={[
             { value: 'ALL', label: 'Todos los estados' },
             { value: 'AVAILABLE', label: 'Con stock disponible' },
@@ -610,12 +591,73 @@ export function DashboardModule() {
           columns={inventoryColumns}
           data={filteredInventory}
           rowKey={(row) => `${row.lot_id}::${row.sku}::${row.owner_id}`}
-          pageSize={12}
-          mobileTitle={(row) => `${row.sku} — ${row.product_name}`}
-          emptyTitle="Sin lotes que coincidan con el filtro"
-          emptyDescription="Ajusta la búsqueda o importa un lote de inventario para visualizar existencias."
+          pageSize={10}
+          mobileTitle={(row) => `${row.product_name} (${row.sku})`}
+          emptyTitle="Sin coincidencias"
+          emptyDescription="Prueba con otro término de búsqueda o cambia el filtro de estado."
         />
-      </section>
+      </GlassCard>
+
+      {/* Drawer de detalle bajo demanda */}
+      <GlassDrawer
+        open={Boolean(selectedLot)}
+        onClose={() => setSelectedLot(null)}
+        title={selectedLot ? selectedLot.product_name : ''}
+        subtitle={selectedLot ? `SKU ${selectedLot.sku} · Lote ${selectedLot.lot_id}` : undefined}
+        footer={
+          <button
+            type="button"
+            className="rtw-btn rtw-btn-primary btn-sm"
+            onClick={() => {
+              setSelectedLot(null);
+              navigate('/operaciones/inventario');
+            }}
+          >
+            Gestionar en Inventario
+            <ArrowRight size={14} />
+          </button>
+        }
+      >
+        {selectedLot && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <span className="rtw-badge rtw-badge-gold">
+                {selectedLot.owner_id} · {selectedLot.owner_name}
+              </span>
+              <span
+                className={`rtw-badge ${
+                  selectedLot.qty_available > 0 ? 'rtw-badge-success' : 'rtw-badge-warning'
+                }`}
+              >
+                {formatInteger(selectedLot.qty_available)} disponibles
+              </span>
+            </div>
+
+            <div className="rtw-form-grid">
+              <div className="rtw-card" style={{ padding: '12px' }}>
+                <div className="rtw-kpi-label">Stock físico</div>
+                <div className="rtw-kpi-value" style={{ fontSize: '1.25rem' }}>
+                  {formatInteger(selectedLot.qty_physical)}
+                </div>
+              </div>
+              <div className="rtw-card" style={{ padding: '12px' }}>
+                <div className="rtw-kpi-label">En revisión</div>
+                <div className="rtw-kpi-value" style={{ fontSize: '1.25rem' }}>
+                  {formatInteger(selectedLot.qty_pending_inspection)}
+                </div>
+              </div>
+              <div className="rtw-card" style={{ padding: '12px' }}>
+                <div className="rtw-kpi-label">Costo unitario</div>
+                <div className="rtw-kpi-value" style={{ fontSize: '1.15rem' }}>
+                  {selectedLot.effective_unit_cost_cop === null
+                    ? 'Pendiente'
+                    : formatCOP(selectedLot.effective_unit_cost_cop)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </GlassDrawer>
     </div>
   );
 }

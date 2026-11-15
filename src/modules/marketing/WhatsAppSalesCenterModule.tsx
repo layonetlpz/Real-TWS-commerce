@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-  MessageCircle,
   Package,
   ShieldCheck,
   CheckCircle2,
@@ -38,6 +37,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import { formatCOP } from '../../utils/formatters';
+import { ModuleHeader, SegmentedTabs } from '../../components/glass';
 
 type WhatsAppCenterTab =
   | 'CATALOG_AND_MESSAGE_BUILDER'
@@ -334,128 +334,45 @@ export const WhatsAppSalesCenterModule: React.FC = () => {
   };
 
   return (
-    <div className="module-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="module-container">
       {/* Encabezado Principal */}
-      <div
-        className="card"
-        style={{
-          background: 'linear-gradient(135deg, #0D0E12 0%, #151821 100%)',
-          border: '1px solid rgba(212, 175, 55, 0.38)',
-          padding: '1.5rem'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '1rem'
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-              <MessageCircle size={22} color="#D4AF37" />
-              <span
-                style={{
-                  color: '#D4AF37',
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase'
-                }}
-              >
-                CENTRO DE VENTAS WHATSAPP Y CRM
-              </span>
-            </div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#F9FAFB', margin: 0 }}>
-              Centro de Ventas por WhatsApp, Catálogo Conectado, 10 Plantillas y Seguimiento CRM
-            </h1>
-            <p style={{ color: '#9CA3AF', marginTop: '0.35rem', fontSize: '0.9rem' }}>
-              Integración mediante enlaces <code>wa.me</code> y respuestas preparadas para WhatsApp Business App. Sin activar Cloud API, sin migrar número, sin envíos automáticos/masivos y ocultando siempre la información interna de propietarios al comprador.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <span
-              className="badge"
-              style={{
-                background: 'rgba(16, 185, 129, 0.15)',
-                color: '#10B981',
-                border: '1px solid #10B981',
-                padding: '0.45rem 0.8rem',
-                fontWeight: 700
-              }}
-            >
-              ✓ V1 Activa: WhatsApp Business App Manual ($0 Costo)
-            </span>
-            <span
-              className="badge"
-              style={{
-                background: 'rgba(212, 175, 55, 0.15)',
-                color: '#F3E5AB',
-                border: '1px solid rgba(212, 175, 55, 0.4)',
-                padding: '0.45rem 0.8rem'
-              }}
-            >
-              Cloud API: Desactivada • Número Sin Migrar
-            </span>
-          </div>
-        </div>
-
-        {/* Pestañas del Centro de Ventas por WhatsApp */}
-        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={
-              activeTab === 'CATALOG_AND_MESSAGE_BUILDER' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('CATALOG_AND_MESSAGE_BUILDER')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Package size={16} />
-            1. Catálogo, Stock Interno y Preparador (10 Plantillas)
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'QUICK_REPLIES_AND_LINKS' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('QUICK_REPLIES_AND_LINKS')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Zap size={16} />
-            2. Respuestas Rápidas, Bienvenida, Ausencia y Enlaces
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'CRM_ORDERS_AND_CUSTOMER_HISTORY'
-                ? 'btn btn-primary'
-                : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('CRM_ORDERS_AND_CUSTOMER_HISTORY')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <ShoppingBag size={16} />
-            3. Prospectos, Seguimiento, Pedidos e Historial ({customerSummaries.length})
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'FUTURE_PLATFORM_ARCHITECTURE' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('FUTURE_PLATFORM_ARCHITECTURE')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Cpu size={16} />
-            4. Arquitectura Futura WhatsApp Business Platform (Inactiva)
-          </button>
-        </div>
-      </div>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="MARKETING · ATENCIÓN WHATSAPP"
+        title="Centro de Ventas WhatsApp"
+        subtitle="Prepara mensajes con stock disponible, respuestas rápidas y enlaces directos wa.me."
+        badge={<span className="rtw-badge rtw-badge-gold">Modo Manual Seguro</span>}
+        bottomSlot={
+          <SegmentedTabs<WhatsAppCenterTab>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              {
+                id: 'CATALOG_AND_MESSAGE_BUILDER',
+                label: 'Catálogo y Mensajes',
+                icon: <Package size={14} />
+              },
+              {
+                id: 'QUICK_REPLIES_AND_LINKS',
+                label: 'Respuestas rápidas',
+                icon: <Zap size={14} />
+              },
+              {
+                id: 'CRM_ORDERS_AND_CUSTOMER_HISTORY',
+                label: 'Clientes y Pedidos',
+                icon: <ShoppingBag size={14} />,
+                count: customerSummaries.length
+              },
+              {
+                id: 'FUTURE_PLATFORM_ARCHITECTURE',
+                label: 'WhatsApp API',
+                icon: <Cpu size={14} />
+              }
+            ]}
+          />
+        }
+      />
 
       {/* =====================================================================
           PESTAÑA 1: CATÁLOGO CONECTADO, STOCK INTERNO Y 10 PLANTILLAS OFICIALES

@@ -20,6 +20,7 @@ import {
 } from '../../services/supabaseDataBridge';
 import { DataTable } from '../../components/DataTable';
 import { LoadingState, ErrorState } from '../../components/StatusStates';
+import { GlassCard, ModuleHeader, SegmentedTabs } from '../../components/glass';
 import type { TableColumn } from '../../types/domain';
 
 interface SettingsFormState {
@@ -77,6 +78,8 @@ export function SettingsConfigModule() {
   const [settingsRow, setSettingsRow] = useState<DbBusinessSettingsRow | null>(null);
   const [form, setForm] = useState<SettingsFormState>(DEFAULT_SETTINGS_FORM);
   const [categories, setCategories] = useState<DbCategoryRow[]>([]);
+
+  const [activeTab, setActiveTab] = useState<'GENERAL' | 'CATEGORIES'>('GENERAL');
 
   const [catCode, setCatCode] = useState('');
   const [catName, setCatName] = useState('');
@@ -263,53 +266,56 @@ export function SettingsConfigModule() {
 
   return (
     <div className="module-container">
-      <div
-        className="rtw-card rtw-card-gold-top"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: 0 }}
-      >
-        <div>
-          <h2 style={{ fontSize: '1.12rem', fontWeight: 800, color: '#0f172a' }}>
-            Configuración General y Catálogo de Categorías
-          </h2>
-          <p style={{ fontSize: '0.84rem', color: '#475569' }}>
-            Parámetros generales del negocio, controles de seguridad operativa e integraciones externas.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="rtw-btn rtw-btn-outline btn-sm"
-          onClick={() => void loadData()}
-        >
-          <RefreshCw size={14} />
-          Actualizar desde Supabase
-        </button>
-      </div>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="GESTIÓN · PREFERENCIAS"
+        title="Configuración y Categorías"
+        subtitle="Ajusta parámetros generales del negocio, integraciones y líneas de producto."
+        actions={
+          <button
+            type="button"
+            className="rtw-btn rtw-btn-ghost-dark btn-sm"
+            onClick={() => void loadData()}
+          >
+            <RefreshCw size={14} />
+            Actualizar
+          </button>
+        }
+        bottomSlot={
+          <SegmentedTabs<'GENERAL' | 'CATEGORIES'>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { id: 'GENERAL', label: 'Parámetros e integraciones', icon: <Settings size={14} /> },
+              {
+                id: 'CATEGORIES',
+                label: 'Categorías',
+                icon: <FolderTree size={14} />,
+                count: categories.length
+              }
+            ]}
+          />
+        }
+      />
 
       {!canEditSettings && (
-        <div
-          className="rtw-card"
-          style={{
-            borderLeft: '4px solid #d4af37',
-            backgroundColor: '#fefce8',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            marginBottom: 0
-          }}
-        >
-          <ShieldAlert size={18} color="#92400e" />
-          <span style={{ fontSize: '0.84rem', color: '#78350f' }}>
-            Estás en modo solo lectura sobre los parámetros globales. Solo un Administrador puede modificar estos valores.
-          </span>
-        </div>
+        <GlassCard style={{ borderLeft: '4px solid var(--rtw-gold-primary)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <ShieldAlert size={18} color="var(--rtw-warning-text)" />
+            <span style={{ fontSize: '0.84rem', color: 'var(--rtw-text-secondary)' }}>
+              Vista de solo lectura. Solo un administrador puede editar parámetros globales.
+            </span>
+          </div>
+        </GlassCard>
       )}
 
-      <form onSubmit={(e) => void handleSaveSettings(e)} className="rtw-card" style={{ marginBottom: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-          <Settings size={18} color="#d4af37" />
-          <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
-            Identidad Comercial, Moneda y Controles de Operación
+      {activeTab === 'GENERAL' && (
+      <form onSubmit={(e) => void handleSaveSettings(e)} className="rtw-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <Settings size={18} color="var(--rtw-gold-ink)" />
+          <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+            Negocio e Integraciones
           </h3>
         </div>
 
@@ -485,13 +491,15 @@ export function SettingsConfigModule() {
               disabled={savingSettings}
             >
               <Save size={15} />
-              {savingSettings ? 'Guardando...' : 'Guardar Configuración'}
+              {savingSettings ? 'Guardando...' : 'Guardar cambios'}
             </button>
           )}
         </div>
       </form>
+      )}
 
-      <section className="rtw-card" style={{ marginBottom: 0 }}>
+      {activeTab === 'CATEGORIES' && (
+      <GlassCard>
         <div
           style={{
             display: 'flex',
@@ -503,13 +511,13 @@ export function SettingsConfigModule() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FolderTree size={18} color="#d4af37" />
+            <FolderTree size={18} color="var(--rtw-gold-ink)" />
             <div>
-              <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
-                Catálogo Maestro de Categorías ({categories.length})
+              <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+                Categorías de producto ({categories.length})
               </h3>
-              <p style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                Clasificación oficial utilizada en productos, inventario y reportes financieros.
+              <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
+                Organiza tu catálogo comercial y tus reportes.
               </p>
             </div>
           </div>
@@ -563,7 +571,7 @@ export function SettingsConfigModule() {
                 id="cat-desc-input"
                 type="text"
                 className="rtw-input"
-                placeholder="Detalle operativo de la línea"
+                placeholder="Detalle de la categoría"
                 value={catDesc}
                 onChange={(e) => setCatDesc(e.target.value)}
               />
@@ -575,7 +583,7 @@ export function SettingsConfigModule() {
               disabled={savingCategory}
             >
               <Plus size={15} />
-              {savingCategory ? 'Guardando...' : 'Agregar / Actualizar'}
+              {savingCategory ? 'Guardando...' : 'Guardar categoría'}
             </button>
           </form>
         )}
@@ -589,7 +597,8 @@ export function SettingsConfigModule() {
           emptyTitle="Sin categorías registradas"
           emptyDescription="Crea la primera categoría desde el formulario superior para clasificar tus productos."
         />
-      </section>
+      </GlassCard>
+      )}
     </div>
   );
 }

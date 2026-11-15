@@ -31,6 +31,7 @@ import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import { ConfirmModal } from '../../components/ConfirmModal';
+import { ModuleHeader, SegmentedTabs } from '../../components/glass';
 
 type EngineTabId =
   | 'STEP_1_UPLOAD_SHEETS'
@@ -193,66 +194,18 @@ export function ExcelImportModule() {
       : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="module-container">
       {/* CABECERA EJECUTIVA DEL MOTOR */}
-      <section
-        className="rtw-card"
-        style={{
-          background: 'linear-gradient(135deg, #11161f 0%, #1d2636 100%)',
-          color: '#f8fafc',
-          border: '1px solid rgba(212, 175, 55, 0.35)'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '16px'
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <span className="rtw-badge rtw-badge-gold">IMPORTACIÓN DE INVENTARIO</span>
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  color: '#cbd5e1',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}
-              >
-                <Lock size={13} color="#d4af37" /> Transaccional · Idempotente · Trazabilidad por Lote
-              </span>
-            </div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-              Motor de Importación Multipropietario (XLSX y CSV UTF-8)
-            </h2>
-            <p style={{ fontSize: '0.84rem', color: '#cbd5e1', marginTop: '4px', maxWidth: '780px' }}>
-              Carga un libro Excel (<code>.xlsx</code>) o archivo <code>.csv</code> UTF-8 con tu inventario multipropietario. Previsualiza el mapeo de columnas, detecta duplicados y costos pendientes (<code>PENDING_COST</code>) y confirma la escritura en base de datos sin sobrescribir saldos históricos.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <label
-              style={{
-                background: '#d4af37',
-                color: '#11161f',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontWeight: 800,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <Upload size={16} />
-              {isLoadingFile ? 'Procesando archivo...' : 'Subir archivo .XLSX o .CSV UTF-8'}
+      <ModuleHeader
+        variant="dark"
+        eyebrow="OPERACIONES · CARGA DE DATOS"
+        title="Importar Inventario (Excel / CSV)"
+        subtitle="Sube tu archivo, valida los datos en vista previa y confirma el ingreso por lote."
+        actions={
+          <>
+            <label className="rtw-btn rtw-btn-gold btn-sm" style={{ cursor: 'pointer' }}>
+              <Upload size={14} />
+              {isLoadingFile ? 'Procesando...' : 'Subir .XLSX / .CSV'}
               <input
                 type="file"
                 accept=".xlsx,.csv"
@@ -260,108 +213,57 @@ export function ExcelImportModule() {
                 style={{ display: 'none' }}
               />
             </label>
-
             <button
               type="button"
+              className="rtw-btn rtw-btn-ghost-dark btn-sm"
               onClick={handleDownloadTemplate}
-              style={{
-                background: 'rgba(255,255,255,0.1)',
-                color: '#ffffff',
-                border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontWeight: 700,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
             >
-              <Download size={16} color="#d4af37" />
-              Descargar Plantilla CSV
+              <Download size={14} />
+              Plantilla CSV
             </button>
-          </div>
-        </div>
-
-        {/* BARRA DE NAVEGACIÓN DE LAS 12 FUNCIONES AGRUPADAS EN 6 ETAPAS */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            flexWrap: 'wrap',
-            marginTop: '16px',
-            paddingTop: '14px',
-            borderTop: '1px solid rgba(255,255,255,0.12)'
-          }}
-        >
-          {[
-            {
-              id: 'STEP_1_UPLOAD_SHEETS' as EngineTabId,
-              label: '1–3. Archivo, Hojas y Encabezados',
-              icon: Layers
-            },
-            {
-              id: 'STEP_2_MAPPING' as EngineTabId,
-              label: '4. Mapeo de 10 Entidades',
-              icon: Table2
-            },
-            {
-              id: 'STEP_3_PREVIEW' as EngineTabId,
-              label: `5. Vista Previa (${analysis?.rows.length ?? 0} filas)`,
-              icon: FileSpreadsheet
-            },
-            {
-              id: 'STEP_4_VALIDATIONS_DUPLICATES' as EngineTabId,
-              label: `6–8 y 12. Validaciones, Duplicados y CSV (${(analysis?.errors.length ?? 0) + (analysis?.warnings.length ?? 0)})`,
-              icon: ShieldCheck
-            },
-            {
-              id: 'STEP_5_SUMMARY_MOVEMENTS' as EngineTabId,
-              label: `9–10. Confirmación, Antes/Después y OPENING_BALANCE (${persistedState.openingMovements.length})`,
-              icon: CheckCircle2
-            },
-            {
-              id: 'STEP_6_HISTORY_TESTS' as EngineTabId,
-              label: `11. Historial (${persistedState.batchesHistory.length}) y 6 Pruebas`,
-              icon: History
-            }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  if (tab.id === 'STEP_3_PREVIEW') {
-                    setHasReviewedPreview(true);
-                  }
-                }}
-                style={{
-                  background: isActive ? '#d4af37' : 'rgba(255,255,255,0.06)',
-                  color: isActive ? '#11161f' : '#e2e8f0',
-                  border: isActive
-                    ? '1px solid #d4af37'
-                    : '1px solid rgba(255,255,255,0.14)',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  fontSize: '0.78rem',
-                  fontWeight: isActive ? 800 : 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Icon size={14} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+          </>
+        }
+        bottomSlot={
+          <SegmentedTabs<EngineTabId>
+            variant="dark"
+            value={activeTab}
+            onChange={(next) => {
+              setActiveTab(next);
+              if (next === 'STEP_3_PREVIEW') {
+                setHasReviewedPreview(true);
+              }
+            }}
+            items={[
+              { id: 'STEP_1_UPLOAD_SHEETS', label: '1. Archivo', icon: <Layers size={14} /> },
+              { id: 'STEP_2_MAPPING', label: '2. Mapeo', icon: <Table2 size={14} /> },
+              {
+                id: 'STEP_3_PREVIEW',
+                label: '3. Vista previa',
+                icon: <FileSpreadsheet size={14} />,
+                count: analysis?.rows.length ?? 0
+              },
+              {
+                id: 'STEP_4_VALIDATIONS_DUPLICATES',
+                label: '4. Validaciones',
+                icon: <ShieldCheck size={14} />,
+                count: (analysis?.errors.length ?? 0) + (analysis?.warnings.length ?? 0)
+              },
+              {
+                id: 'STEP_5_SUMMARY_MOVEMENTS',
+                label: '5. Confirmación',
+                icon: <CheckCircle2 size={14} />,
+                count: persistedState.openingMovements.length
+              },
+              {
+                id: 'STEP_6_HISTORY_TESTS',
+                label: 'Historial',
+                icon: <History size={14} />,
+                count: persistedState.batchesHistory.length
+              }
+            ]}
+          />
+        }
+      />
 
       {/* BARRA DE ACCIÓN RÁPIDA SI HAY UN ARCHIVO CARGADO */}
       {analysis && (

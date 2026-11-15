@@ -1,13 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  BarChart3,
   Download,
   FileSpreadsheet,
   Printer,
   Filter,
   RotateCcw,
   ShieldCheck,
-  Database,
   Layers,
   Users,
   ShoppingBag,
@@ -46,6 +44,12 @@ import type { SalesOrderStatus } from '../../services/salesOrdersCrmService';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
+import {
+  GlassDisclosure,
+  GlassDropdown,
+  ModuleHeader,
+  SegmentedTabs
+} from '../../components/glass';
 
 type BiDashboardTab =
   | 'GENERAL'
@@ -136,110 +140,75 @@ export const BusinessIntelligenceModule: React.FC = () => {
   const g = snapshot.general;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="module-container">
       {/* HEADER EJECUTIVO */}
-      <div className="rtw-card rtw-card-gold-top">
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '14px'
-          }}
-        >
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                color: '#92400e'
-              }}
-            >
-              <BarChart3 size={15} />
-              BUSINESS INTELLIGENCE DE REAL TWS
-            </div>
-            <h1 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: '4px' }}>
-              Analítica Ejecutiva, Multipropietario, Comercial y Marketing
-            </h1>
-            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-secondary)', marginTop: '4px' }}>
-              Cálculos basados exclusivamente en transacciones reales conciliadas. Los pedidos en{' '}
-              <strong>borrador / reservado</strong> se excluyen de ingresos realizados y se muestran aparte como
-              estimación.
-            </p>
-          </div>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="GESTIÓN · ANALÍTICA Y REPORTES"
+        title="Analítica de Negocio"
+        subtitle="Indicadores reales de ingresos, rentabilidad por propietario, catálogo y campañas."
+        actions={
+          <>
+            <button type="button" className="rtw-btn rtw-btn-gold btn-sm" onClick={handleExportPdf}>
+              <Printer size={14} /> Exportar PDF
+            </button>
+            <GlassDropdown
+              label="Exportar CSV"
+              icon={<Download size={14} />}
+              variant="ghost-dark"
+              options={[
+                {
+                  id: 'csv-general',
+                  label: 'Resumen General (CSV)',
+                  icon: <FileSpreadsheet size={14} />,
+                  onClick: () => handleExportCsv('GENERAL')
+                },
+                {
+                  id: 'csv-owners',
+                  label: 'Por Propietario (CSV)',
+                  icon: <Users size={14} />,
+                  onClick: () => handleExportCsv('OWNERS')
+                },
+                {
+                  id: 'csv-sku',
+                  label: 'Por SKU (CSV)',
+                  icon: <ShoppingBag size={14} />,
+                  onClick: () => handleExportCsv('SKU')
+                }
+              ]}
+            />
+          </>
+        }
+        bottomSlot={
+          <SegmentedTabs<BiDashboardTab>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { id: 'GENERAL', label: 'General', icon: <Layers size={14} /> },
+              { id: 'MULTI_OWNER', label: 'Propietarios', icon: <Users size={14} /> },
+              { id: 'COMMERCIAL', label: 'Comercial y SKUs', icon: <ShoppingBag size={14} /> },
+              { id: 'MARKETING', label: 'Marketing', icon: <Megaphone size={14} /> },
+              {
+                id: 'UNDERLYING_CONTRAST',
+                label: 'Registros base',
+                icon: <ShieldCheck size={14} />,
+                count: snapshot.underlyingRecords.length
+              }
+            ]}
+          />
+        }
+      />
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            <button type="button" className="rtw-btn rtw-btn-outline" onClick={() => handleExportCsv('GENERAL')}>
-              <FileSpreadsheet size={14} /> CSV General
-            </button>
-            <button type="button" className="rtw-btn rtw-btn-outline" onClick={() => handleExportCsv('OWNERS')}>
-              <Download size={14} /> CSV Propietarios
-            </button>
-            <button type="button" className="rtw-btn rtw-btn-outline" onClick={() => handleExportCsv('SKU')}>
-              <Download size={14} /> CSV SKUs
-            </button>
-            <button type="button" className="rtw-btn rtw-btn-primary" onClick={handleExportPdf}>
-              <Printer size={14} /> Exportar PDF Ejecutivo
-            </button>
-          </div>
-        </div>
-
-        {/* SELLO DE FECHA Y CRITERIOS REGISTRADOS */}
-        <div
-          style={{
-            marginTop: '14px',
-            padding: '10px 12px',
-            borderRadius: 'var(--rtw-radius-sm)',
-            backgroundColor: 'var(--rtw-bg-subtle)',
-            border: '1px solid var(--rtw-border-light)',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            gap: '10px',
-            fontSize: '0.78rem',
-            color: 'var(--rtw-text-secondary)'
-          }}
-        >
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <Database size={14} />
-            <strong>Criterio aplicado:</strong> {snapshot.appliedFilterSummary}
-          </span>
-          <span>
-            <strong>Corte evaluado:</strong> {new Date(snapshot.generatedAt).toLocaleString('es-CO')}
-          </span>
-        </div>
-      </div>
-
-      {/* PANEL DE 8 FILTROS */}
-      <div className="rtw-card">
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '12px'
-          }}
-        >
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              textTransform: 'uppercase'
-            }}
-          >
-            <Filter size={14} /> Filtros Multidimensionales
-          </div>
-          <button type="button" className="rtw-btn rtw-btn-outline" onClick={handleResetFilters}>
-            <RotateCcw size={13} /> Restablecer
+      {/* PANEL DE FILTROS COLAPSABLE */}
+      <GlassDisclosure
+        title="Filtros de análisis"
+        subtitle={`${snapshot.appliedFilterSummary} · Corte: ${new Date(snapshot.generatedAt).toLocaleString('es-CO')}`}
+        icon={<Filter size={15} />}
+      >
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '12px 0' }}>
+          <button type="button" className="rtw-btn rtw-btn-outline btn-sm" onClick={handleResetFilters}>
+            <RotateCcw size={13} /> Restablecer filtros
           </button>
         </div>
 
@@ -414,36 +383,7 @@ export const BusinessIntelligenceModule: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
-
-      {/* NAVEGACIÓN DE DASHBOARDS */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-        {[
-          { id: 'GENERAL', label: 'Dashboard General', icon: Layers },
-          { id: 'MULTI_OWNER', label: 'Dashboard Multipropietario', icon: Users },
-          { id: 'COMMERCIAL', label: 'Dashboard Comercial & SKUs', icon: ShoppingBag },
-          { id: 'MARKETING', label: 'Analítica de Marketing', icon: Megaphone },
-          {
-            id: 'UNDERLYING_CONTRAST',
-            label: `Contraste Subyacente (${snapshot.underlyingRecords.length})`,
-            icon: ShieldCheck
-          }
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as BiDashboardTab)}
-              className={`rtw-btn ${active ? 'rtw-btn-primary' : 'rtw-btn-outline'}`}
-            >
-              <Icon size={14} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      </GlassDisclosure>
 
       {/* ===================================================================== */}
       {/* TAB 1: DASHBOARD GENERAL                                              */}

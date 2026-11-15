@@ -46,6 +46,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
+import { SegmentedTabs } from '../../components/glass';
 import { formatCOP } from '../../utils/formatters';
 
 function formatDateCO(iso: string): string {
@@ -443,16 +444,9 @@ export const CreativeStudioModule: React.FC = () => {
   };
 
   return (
-    <div className="module-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="module-container rtw-stack-lg">
       {/* Encabezado Maestro */}
-      <div
-        className="card"
-        style={{
-          background: 'linear-gradient(135deg, #0D0E12 0%, #151821 100%)',
-          border: '1px solid rgba(212, 175, 55, 0.38)',
-          padding: '1.5rem'
-        }}
-      >
+      <div className="card rtw-glass-dark" style={{ padding: '1.35rem 1.5rem' }}>
         <div
           style={{
             display: 'flex',
@@ -463,55 +457,38 @@ export const CreativeStudioModule: React.FC = () => {
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.4rem' }}>
-              <Sparkles size={22} color="#D4AF37" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.3rem' }}>
+              <Sparkles size={18} color="#D4AF37" />
               <span
                 style={{
                   color: '#D4AF37',
-                  fontSize: '0.78rem',
+                  fontSize: '0.72rem',
                   fontWeight: 700,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase'
                 }}
               >
-                ESTUDIO CREATIVO Y DISEÑO COMERCIAL
+                Estudio Creativo
               </span>
             </div>
-            <h1 style={{ fontSize: '1.55rem', fontWeight: 800, color: '#F9FAFB', margin: 0 }}>
-              Estudio Creativo, Copywriting Multicanal, Guiones de Video e Image Composer
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 750, color: '#F9FAFB', margin: 0, letterSpacing: '-0.02em' }}>
+              Copywriting, Guiones e Image Composer
             </h1>
-            <p style={{ color: '#9CA3AF', marginTop: '0.35rem', fontSize: '0.92rem' }}>
-              Integrado al catálogo real, stock verificado, precios aprobados, Brand Kit REAL TWS y consentimiento comercial multipropietario.
+            <p style={{ color: '#9CA3AF', marginTop: '0.3rem', fontSize: '0.88rem' }}>
+              Piezas comerciales conectadas a stock real, Brand Kit y autorización por propietario.
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <span
-              className="badge"
-              style={{
-                background: complianceResult.passedAll
-                  ? 'rgba(16, 185, 129, 0.15)'
-                  : 'rgba(239, 68, 68, 0.15)',
-                color: complianceResult.passedAll ? '#10B981' : '#EF4444',
-                border: `1px solid ${complianceResult.passedAll ? '#10B981' : '#EF4444'}`,
-                padding: '0.45rem 0.85rem',
-                fontWeight: 700
-              }}
+              className={`rtw-badge ${complianceResult.passedAll ? 'badge-success' : 'badge-danger'}`}
             >
               {complianceResult.passedAll
-                ? '✓ 5/5 Reglas Comerciales Aprobadas'
-                : `⚠ ${complianceResult.blockingErrors.length} Bloqueo(s) Activo(s)`}
+                ? '5/5 Reglas Aprobadas'
+                : `${complianceResult.blockingErrors.length} Bloqueo(s)`}
             </span>
-            <span
-              className="badge"
-              style={{
-                background: 'rgba(212, 175, 55, 0.15)',
-                color: '#F3E5AB',
-                border: '1px solid rgba(212, 175, 55, 0.4)',
-                padding: '0.45rem 0.85rem'
-              }}
-            >
-              Proyectos Guardados: {studioState.projects.length}
+            <span className="rtw-badge badge-gold">
+              {studioState.projects.length} proyectos
             </span>
           </div>
         </div>
@@ -599,66 +576,46 @@ export const CreativeStudioModule: React.FC = () => {
         </div>
 
         {/* Pestañas de Navegación del Estudio */}
-        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1.2rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={activeTab === 'VALIDATION_AND_CONSENT' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('VALIDATION_AND_CONSENT')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <ShieldCheck size={16} />
-            1. Validación &amp; Consentimiento ({currentConsent?.status === 'granted' ? 'Autorizado' : 'Pendiente'})
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'COPYWRITING' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('COPYWRITING')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <FileText size={16} />
-            2. Copywriting (5 Títulos, 5 Textos, 4 Canales)
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'VIDEO_STORYBOARD' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('VIDEO_STORYBOARD')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Video size={16} />
-            3. Guiones de Video &amp; Storyboard (10s, 15s, 30s, 45s)
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'IMAGE_COMPOSER' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('IMAGE_COMPOSER')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <ImageIcon size={16} />
-            4. Image Composer (1:1, 4:5, 9:16) &amp; Brand Kit
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'AI_PROVIDER_ADAPTER' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('AI_PROVIDER_ADAPTER')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Cpu size={16} />
-            5. Adaptador IA Opcional &amp; Cuota
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'MEDIA_LIBRARY' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('MEDIA_LIBRARY')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <FolderArchive size={16} />
-            6. Biblioteca &amp; Versiones ({studioState.projects.length})
-          </button>
+        <div style={{ marginTop: '1.15rem' }}>
+          <SegmentedTabs
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            ariaLabel="Secciones de Estudio Creativo"
+            items={[
+              {
+                id: 'VALIDATION_AND_CONSENT',
+                label: currentConsent?.status === 'granted' ? 'Validación · OK' : 'Validación',
+                icon: <ShieldCheck size={15} />
+              },
+              {
+                id: 'COPYWRITING',
+                label: 'Copywriting',
+                icon: <FileText size={15} />
+              },
+              {
+                id: 'VIDEO_STORYBOARD',
+                label: 'Guiones Video',
+                icon: <Video size={15} />
+              },
+              {
+                id: 'IMAGE_COMPOSER',
+                label: 'Image Composer',
+                icon: <ImageIcon size={15} />
+              },
+              {
+                id: 'AI_PROVIDER_ADAPTER',
+                label: 'Adaptador IA',
+                icon: <Cpu size={15} />
+              },
+              {
+                id: 'MEDIA_LIBRARY',
+                label: 'Biblioteca',
+                icon: <FolderArchive size={15} />,
+                count: studioState.projects.length
+              }
+            ]}
+          />
         </div>
       </div>
 

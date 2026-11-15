@@ -93,50 +93,39 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (!isSupabaseReady) {
     return (
       <div
-        style={{
-          minHeight: '100vh',
-          backgroundColor: '#0f141c',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px'
-        }}
+        className="rtw-card rtw-glass-elevated rtw-card-gold-top"
+        style={{ maxWidth: 520, width: '100%', margin: '0 auto', background: 'rgba(255, 255, 255, 0.92)' }}
       >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+          <AlertTriangle size={22} color="#b8901d" />
+          <div>
+            <span className="rtw-badge rtw-badge-warning">Configuración requerida</span>
+            <h1 style={{ fontSize: '1.12rem', fontWeight: 800, color: 'var(--rtw-text-primary)', marginTop: '4px' }}>
+              Conecta Supabase para continuar
+            </h1>
+          </div>
+        </div>
+
+        <p style={{ fontSize: '0.86rem', color: 'var(--rtw-text-secondary)', marginBottom: '14px' }}>
+          Faltan las variables públicas de entorno para iniciar el sistema de forma segura.
+        </p>
+
         <div
-          className="rtw-card rtw-card-gold-top"
-          style={{ maxWidth: 620, width: '100%' }}
+          style={{
+            backgroundColor: 'rgba(248, 250, 252, 0.85)',
+            border: '1px solid var(--rtw-border-light)',
+            borderRadius: '10px',
+            padding: '12px 14px',
+            fontSize: '0.82rem',
+            color: 'var(--rtw-text-primary)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px'
+          }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-            <AlertTriangle size={24} color="#d4af37" />
-            <div>
-              <span className="rtw-badge rtw-badge-warning">Configuración Pendiente</span>
-              <h1 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', marginTop: '4px' }}>
-                Falta configurar la conexión a Supabase
-              </h1>
-            </div>
-          </div>
-
-          <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '14px' }}>
-            La aplicación requiere las variables públicas de entorno para conectar con autenticación y base de datos en producción. Por seguridad, el acceso operativo permanece bloqueado hasta completar la configuración.
-          </p>
-
-          <div
-            style={{
-              backgroundColor: '#f8fafc',
-              border: '1px solid #cbd5e1',
-              borderRadius: '8px',
-              padding: '12px 14px',
-              fontSize: '0.82rem',
-              color: '#1e293b',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px'
-            }}
-          >
-            <strong>Variables requeridas:</strong>
-            <code>VITE_SUPABASE_URL</code>
-            <code>VITE_SUPABASE_ANON_KEY</code>
-          </div>
+          <strong>Variables necesarias en .env.local:</strong>
+          <code>VITE_SUPABASE_URL</code>
+          <code>VITE_SUPABASE_ANON_KEY</code>
         </div>
       </div>
     );

@@ -33,6 +33,7 @@ import {
 import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
+import { ModuleHeader, SegmentedTabs } from '../../components/glass';
 
 export type BrandMerchTab =
   | 'BRAND_CENTER'
@@ -284,95 +285,43 @@ export function BrandMerchandisingModule({
   return (
     <div className="module-container">
       {/* ENCABEZADO PRINCIPAL */}
-      <div className="card" style={{ marginBottom: '1.25rem' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '1rem'
-          }}
-        >
-          <div>
-            <span className="badge badge-gold" style={{ marginBottom: '0.45rem' }}>
-              BRAND & MERCHANDISING CENTER — IDENTIDAD NEGRO CARBÓN Y DORADO
-            </span>
-            <h1 style={{ fontSize: '1.45rem', margin: 0 }}>
-              Centro de Marca, Merchandising Digital y Material Físico Imprimible
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', marginTop: '0.35rem', fontSize: '0.9rem' }}>
-              Conectado en tiempo real a los {catalogItems.length} SKUs reales del catálogo. Sin logotipos falsos de fabricantes, con versionado inmutable y exportación local a PNG, SVG y PDF ($0 en APIs externas).
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.55rem', flexWrap: 'wrap' }}>
-            <span className="badge badge-success">
-              Versión Marca Activa: v{brandState.brandVersions[0]?.versionNumber || 1}
-            </span>
-            <span className="badge badge-gold">
-              Piezas Guardadas: {brandState.savedAssets.length}
-            </span>
-          </div>
-        </div>
-
-        {/* PESTAÑAS DEL MÓDULO */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '0.5rem',
-            flexWrap: 'wrap',
-            marginTop: '1.1rem',
-            paddingTop: '0.95rem',
-            borderTop: '1px solid var(--border-subtle)'
-          }}
-        >
-          <button
-            type="button"
-            className={`btn ${activeTab === 'BRAND_CENTER' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setActiveTab('BRAND_CENTER')}
-          >
-            <Award size={16} />
-            1. Brand Center (Identidad y Guía Visual)
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'DIGITAL_MERCHANDISING' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => {
-              setActiveTab('DIGITAL_MERCHANDISING');
-              if (designConfig.category !== 'DIGITAL') {
+      <ModuleHeader
+        variant="dark"
+        eyebrow="MARKETING · IDENTIDAD Y MATERIAL"
+        title="Branding y Merchandising"
+        subtitle={`Identidad visual oficial, ${catalogItems.length} SKUs conectados y material imprimible.`}
+        badge={
+          <span className="rtw-badge rtw-badge-gold">
+            v{brandState.brandVersions[0]?.versionNumber || 1} · {brandState.savedAssets.length} piezas
+          </span>
+        }
+        bottomSlot={
+          <SegmentedTabs<BrandMerchTab>
+            variant="dark"
+            value={activeTab}
+            onChange={(next) => {
+              setActiveTab(next);
+              if (next === 'DIGITAL_MERCHANDISING' && designConfig.category !== 'DIGITAL') {
                 handleSelectFormat('product_sheet_digital', 'DIGITAL');
               }
-            }}
-          >
-            <Sparkles size={16} />
-            2. Digital Merchandising (9 Formatos)
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'PHYSICAL_MERCHANDISING' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => {
-              setActiveTab('PHYSICAL_MERCHANDISING');
-              if (designConfig.category !== 'PHYSICAL') {
+              if (next === 'PHYSICAL_MERCHANDISING' && designConfig.category !== 'PHYSICAL') {
                 handleSelectFormat('sku_label', 'PHYSICAL');
               }
             }}
-          >
-            <Printer size={16} />
-            3. Physical Merchandising e Impresión PDF (7 Formatos)
-          </button>
-          <button
-            type="button"
-            className={`btn ${
-              activeTab === 'TEMPLATE_LIBRARY_AND_VERSIONS' ? 'btn-primary' : 'btn-secondary'
-            }`}
-            onClick={() => setActiveTab('TEMPLATE_LIBRARY_AND_VERSIONS')}
-          >
-            <History size={16} />
-            4. Biblioteca de Plantillas (16) y Versiones ({brandState.savedAssets.length})
-          </button>
-        </div>
-      </div>
+            items={[
+              { id: 'BRAND_CENTER', label: 'Identidad', icon: <Award size={14} /> },
+              { id: 'DIGITAL_MERCHANDISING', label: 'Digital', icon: <Sparkles size={14} /> },
+              { id: 'PHYSICAL_MERCHANDISING', label: 'Impresos PDF', icon: <Printer size={14} /> },
+              {
+                id: 'TEMPLATE_LIBRARY_AND_VERSIONS',
+                label: 'Biblioteca',
+                icon: <History size={14} />,
+                count: brandState.savedAssets.length
+              }
+            ]}
+          />
+        }
+      />
 
       {/* ===================================================================== */}
       {/* TAB 1: BRAND CENTER (LOGO, VARIANTES, COLORES, TIPOGRAFÍA, ESLOGAN)   */}

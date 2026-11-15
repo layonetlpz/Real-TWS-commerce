@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { NotificationCenter } from '../components/NotificationCenter';
@@ -9,6 +9,7 @@ export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { authStatus, isSupabaseReady } = useAuth();
+  const location = useLocation();
 
   if (!isSupabaseReady || authStatus !== 'AUTHENTICATED') {
     return (
@@ -20,7 +21,9 @@ export function AppLayout() {
           </div>
         </header>
         <main className="rtw-auth-main">
-          <Outlet />
+          <div key={location.pathname} className="rtw-route-stage" style={{ width: '100%' }}>
+            <Outlet />
+          </div>
         </main>
         <NotificationCenter />
       </div>
@@ -43,7 +46,9 @@ export function AppLayout() {
       >
         <Header onOpenMobileMenu={() => setMobileMenuOpen(true)} />
         <main className="rtw-main-content">
-          <Outlet />
+          <div key={location.pathname} className="rtw-route-stage">
+            <Outlet />
+          </div>
         </main>
       </div>
 

@@ -10,6 +10,7 @@ import {
 import { DataTable } from '../../components/DataTable';
 import { FilterBar } from '../../components/FilterBar';
 import { ErrorState } from '../../components/StatusStates';
+import { GlassCard, GlassDisclosure, ModuleHeader, StatCard } from '../../components/glass';
 import type { SecurityAuditEvent, TableColumn } from '../../types/domain';
 
 export function AuditModule() {
@@ -168,101 +169,60 @@ export function AuditModule() {
 
   return (
     <div className="module-container">
-      <div
-        className="rtw-card rtw-card-gold-top"
-        style={{
-          background: 'linear-gradient(135deg, #0f141c 0%, #171e29 100%)',
-          color: '#f8fafc',
-          marginBottom: 0
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <FileSearch size={20} color="#d4af37" />
-              <span className="rtw-badge rtw-badge-gold">
-                BITÁCORA INMUTABLE — EXCLUSIVO ADMIN
-              </span>
-            </div>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#d4af37' }}>
-              Auditoría de Operaciones y Eventos de Seguridad
-            </h2>
-            <p style={{ fontSize: '0.84rem', color: '#cbd5e1' }}>
-              Consulta histórica directa en <code>public.audit_logs</code> (protegida contra modificación o borrado) y trazabilidad de bloqueos de seguridad.
-            </p>
-          </div>
+      <ModuleHeader
+        variant="dark"
+        eyebrow="GESTIÓN · TRAZABILIDAD"
+        title="Auditoría de Operaciones"
+        subtitle="Registro cronológico inmutable de movimientos críticos y eventos de seguridad."
+        badge={<span className="rtw-badge rtw-badge-gold">Solo Admin</span>}
+        actions={
+          <button
+            type="button"
+            className="rtw-btn rtw-btn-ghost-dark btn-sm"
+            onClick={() => void loadDbAuditLogs()}
+          >
+            <RefreshCw size={14} />
+            Actualizar
+          </button>
+        }
+      />
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline btn-sm"
-              onClick={() => void loadDbAuditLogs()}
-            >
-              <RefreshCw size={14} />
-              Actualizar Bitácora
-            </button>
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-primary btn-sm"
-              onClick={handleGenerateAuditProof}
-            >
-              <Play size={14} />
-              Ejecutar Pruebas de Bloqueo
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '16px'
-        }}
-      >
-        <div className="rtw-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <Lock size={18} color="#d4af37" />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800 }}>
-              Triggers Inmutables en PostgreSQL
-            </h3>
-          </div>
-          <p style={{ fontSize: '0.82rem', color: '#475569' }}>
-            Cambios críticos en acuerdos, asignaciones por lote, transferencias, perfiles y liquidaciones registran instantáneamente su estado previo y posterior.
-          </p>
-        </div>
-
-        <div className="rtw-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <ShieldCheck size={18} color="#166534" />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800 }}>
-              Control de Acceso y Seguridad RLS
-            </h3>
-          </div>
-          <p style={{ fontSize: '0.82rem', color: '#475569' }}>
-            Solo usuarios con rol <code>ADMIN</code> pueden leer esta bitácora; la base de datos bloquea cualquier intento de alteración o eliminación.
-          </p>
-        </div>
-      </div>
+      <section className="rtw-kpi-grid">
+        <StatCard
+          staggerIndex={1}
+          label="Registros en bitácora"
+          value={filteredDbLogs.length}
+          sub="Consultados en base de datos"
+          icon={<FileSearch size={16} />}
+        />
+        <StatCard
+          staggerIndex={2}
+          tone="gold"
+          label="Protección"
+          value="Inmutable"
+          sub="Sin edición ni borrado"
+          icon={<Lock size={16} />}
+        />
+        <StatCard
+          staggerIndex={3}
+          tone="success"
+          label="Eventos de sesión"
+          value={securityEvents.length}
+          sub="Validaciones de acceso"
+          icon={<ShieldCheck size={16} />}
+        />
+      </section>
 
       {dbError && (
         <ErrorState
-          message={`No se pudo consultar public.audit_logs: ${dbError}`}
+          message={`No se pudo consultar la bitácora: ${dbError}`}
           onRetry={() => void loadDbAuditLogs()}
         />
       )}
 
-      <section className="rtw-card" style={{ marginBottom: 0 }}>
+      <GlassCard>
         <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '12px' }}>
-          Registros Históricos en Base de Datos ({filteredDbLogs.length})
+          Historial de cambios ({filteredDbLogs.length})
         </h3>
 
         <FilterBar
@@ -270,7 +230,7 @@ export function AuditModule() {
           onSearchChange={setSearchQuery}
           statusFilter={tableFilter}
           onStatusFilterChange={setTableFilter}
-          placeholder="Buscar por acción, tabla, registro, propietario o motivo..."
+          placeholder="Buscar acción, tabla, registro o motivo..."
           statusOptions={[
             { value: 'ALL', label: 'Todas las tablas' },
             ...uniqueTables.map((t) => ({ value: t, label: t }))
@@ -288,15 +248,26 @@ export function AuditModule() {
           loading={loadingDb}
           pageSize={12}
           mobileTitle={(row) => `${row.action_type} · ${row.table_name}`}
-          emptyTitle="Sin registros en bitácora todavía"
+          emptyTitle="Sin registros en bitácora"
           emptyDescription="Los movimientos críticos y cambios administrativos aparecerán aquí automáticamente."
         />
-      </section>
+      </GlassCard>
 
-      <section className="rtw-card" style={{ marginBottom: 0 }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '12px' }}>
-          Eventos de Guardia Evaluados en Sesión ({securityEvents.length})
-        </h3>
+      <GlassDisclosure
+        title={`Eventos de seguridad en sesión (${securityEvents.length})`}
+        subtitle="Pruebas y validaciones de acceso evaluadas durante tu sesión actual."
+        icon={<ShieldCheck size={16} />}
+      >
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '12px 0' }}>
+          <button
+            type="button"
+            className="rtw-btn rtw-btn-primary btn-sm"
+            onClick={handleGenerateAuditProof}
+          >
+            <Play size={14} />
+            Ejecutar verificación de bloqueos
+          </button>
+        </div>
 
         <DataTable
           columns={sessionColumns}
@@ -304,10 +275,10 @@ export function AuditModule() {
           rowKey={(row) => row.id}
           pageSize={8}
           mobileTitle={(row) => `${row.eventType} · ${row.outcome}`}
-          emptyTitle="Sin eventos de bloqueo en la sesión actual"
-          emptyDescription="Pulsa 'Ejecutar Pruebas de Bloqueo' o evalúa un acceso restringido para visualizar las guardias activas."
+          emptyTitle="Sin eventos en esta sesión"
+          emptyDescription="Ejecuta una verificación si deseas probar las reglas de seguridad."
         />
-      </section>
+      </GlassDisclosure>
     </div>
   );
 }

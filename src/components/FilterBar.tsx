@@ -1,4 +1,4 @@
-import { Search, RotateCcw } from 'lucide-react';
+import { Search, RotateCcw, X } from 'lucide-react';
 
 interface FilterBarProps {
   searchQuery: string;
@@ -19,32 +19,53 @@ export function FilterBar({
   onReset,
   placeholder = 'Buscar por código, SKU, lote o referencia...'
 }: FilterBarProps) {
+  const hasFilters = searchQuery.trim() !== '' || statusFilter !== (statusOptions[0]?.value ?? 'ALL');
+
   return (
     <div className="rtw-filter-bar" role="search" aria-label="Filtros de tabla">
       <div className="rtw-field" style={{ flex: '1 1 260px' }}>
         <label className="rtw-label" htmlFor="table-search-input">
-          Búsqueda Rápida
+          Buscar
         </label>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <Search
             size={15}
-            style={{ position: 'absolute', left: '10px', color: '#64748b' }}
+            style={{ position: 'absolute', left: '11px', color: 'var(--rtw-text-muted)', pointerEvents: 'none' }}
           />
           <input
             id="table-search-input"
             type="search"
             className="rtw-input"
-            style={{ width: '100%', paddingLeft: '32px' }}
+            style={{ width: '100%', paddingLeft: '34px', paddingRight: searchQuery ? '32px' : '12px' }}
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={placeholder}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => onSearchChange('')}
+              aria-label="Limpiar búsqueda"
+              style={{
+                position: 'absolute',
+                right: '8px',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--rtw-text-muted)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                padding: '3px'
+              }}
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="rtw-field" style={{ minWidth: '200px' }}>
         <label className="rtw-label" htmlFor="table-status-select">
-          Estado Operativo
+          Estado
         </label>
         <select
           id="table-status-select"
@@ -60,14 +81,16 @@ export function FilterBar({
         </select>
       </div>
 
-      <button
-        type="button"
-        className="rtw-btn rtw-btn-outline"
-        onClick={onReset}
-      >
-        <RotateCcw size={15} />
-        Limpiar Filtros
-      </button>
+      {hasFilters && (
+        <button
+          type="button"
+          className="rtw-btn rtw-btn-outline btn-sm"
+          onClick={onReset}
+        >
+          <RotateCcw size={14} />
+          Restablecer
+        </button>
+      )}
     </div>
   );
 }

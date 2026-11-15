@@ -17,7 +17,7 @@ export function ConfirmModal({
   title,
   description,
   ruleReminder,
-  confirmLabel = 'Confirmar Operación',
+  confirmLabel = 'Confirmar',
   cancelLabel = 'Cancelar',
   onConfirm,
   onCancel
@@ -52,11 +52,24 @@ export function ConfirmModal({
             marginBottom: '12px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <AlertTriangle size={20} color="#d4af37" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                background: 'rgba(212, 175, 55, 0.16)',
+                border: '1px solid rgba(212, 175, 55, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <AlertTriangle size={18} color="#b8901d" />
+            </span>
             <h2
               id="rtw-modal-title"
-              style={{ fontSize: '1.05rem', fontWeight: 800, color: '#111827' }}
+              style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--rtw-text-primary)' }}
             >
               {title}
             </h2>
@@ -71,23 +84,23 @@ export function ConfirmModal({
           </button>
         </div>
 
-        <p style={{ fontSize: '0.88rem', color: '#475569', marginBottom: '14px' }}>
+        <p style={{ fontSize: '0.88rem', color: 'var(--rtw-text-secondary)', marginBottom: '16px' }}>
           {description}
         </p>
 
         {ruleReminder && (
           <div
             style={{
-              backgroundColor: '#fef9e7',
-              border: '1px solid rgba(212, 175, 55, 0.45)',
-              borderRadius: '6px',
+              backgroundColor: 'var(--rtw-warning-bg)',
+              border: '1px solid var(--rtw-warning-border)',
+              borderRadius: '10px',
               padding: '10px 12px',
               fontSize: '0.8rem',
-              color: '#78350f',
+              color: 'var(--rtw-warning-text)',
               marginBottom: '18px'
             }}
           >
-            <strong>Nota de control operativo:</strong> {ruleReminder}
+            {ruleReminder}
           </div>
         )}
 

@@ -48,6 +48,7 @@ import {
   type SocialPublicationCalendarItem,
   type SocialDistributionTestSummary
 } from '../../services/socialMarketplaceService';
+import { SegmentedTabs } from '../../components/glass';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -496,16 +497,9 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   return (
-    <div className="module-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="module-container rtw-stack-lg">
       {/* Cabecera Ejecutiva */}
-      <div
-        className="card"
-        style={{
-          background: 'linear-gradient(135deg, #0D0E12 0%, #151821 100%)',
-          border: '1px solid rgba(212, 175, 55, 0.38)',
-          padding: '1.5rem'
-        }}
-      >
+      <div className="card rtw-glass-dark" style={{ padding: '1.35rem 1.5rem' }}>
         <div
           style={{
             display: 'flex',
@@ -516,43 +510,34 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-              <Share2 size={21} color="#D4AF37" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.3rem' }}>
+              <Share2 size={18} color="#D4AF37" />
               <span
                 style={{
                   color: '#D4AF37',
-                  fontSize: '0.78rem',
+                  fontSize: '0.72rem',
                   fontWeight: 700,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase'
                 }}
               >
-                DISTRIBUCIÓN EN MARKETPLACE Y REDES SOCIALES
+                Social &amp; Marketplace
               </span>
             </div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#F9FAFB', margin: 0 }}>
-              Marketplace Asistido, Calendario Editorial, Facebook Pages, Instagram &amp; WhatsApp Status
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 750, color: '#F9FAFB', margin: 0, letterSpacing: '-0.02em' }}>
+              Marketplace, Calendario y Estados
             </h1>
-            <p style={{ color: '#9CA3AF', marginTop: '0.35rem', fontSize: '0.9rem' }}>
-              Control estricto de stock y propietario, precios mínimos aprobados, adaptadores Graph API oficiales separados en servidor y cero automatización de navegador.
+            <p style={{ color: '#9CA3AF', marginTop: '0.3rem', fontSize: '0.88rem' }}>
+              Publicación controlada por stock, propietario y precios mínimos aprobados.
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <span
-              className="badge"
-              style={{
-                background: distState.testSafeModeNoExternalPublish
-                  ? 'rgba(16, 185, 129, 0.16)'
-                  : 'rgba(245, 158, 11, 0.16)',
-                color: distState.testSafeModeNoExternalPublish ? '#10B981' : '#F59E0B',
-                border: '1px solid currentColor',
-                padding: '0.45rem 0.8rem',
-                fontWeight: 700
-              }}
+              className={`rtw-badge ${distState.testSafeModeNoExternalPublish ? 'badge-success' : 'badge-warning'}`}
             >
               {distState.testSafeModeNoExternalPublish
-                ? '🛡️ Modo Seguro Activo: Cero Publicación Externa en Pruebas'
+                ? 'Modo Seguro: Sin publicación externa'
                 : 'Modo Despacho Externo'}
             </span>
           </div>
@@ -690,50 +675,38 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
         </div>
 
         {/* Pestañas Principales */}
-        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1.15rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={activeTab === 'MARKETPLACE_ASSISTED' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('MARKETPLACE_ASSISTED')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Store size={16} />
-            1. Marketplace Asistido ({distState.marketplaceListings.length})
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'SOCIAL_CALENDAR_PUBLISHER' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('SOCIAL_CALENDAR_PUBLISHER')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <CalendarIcon size={16} />
-            2. Calendario (Diario/Semanal/Mensual) &amp; Publisher ({distState.calendarPublications.length})
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'OFFICIAL_GRAPH_ADAPTERS' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('OFFICIAL_GRAPH_ADAPTERS')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Lock size={16} />
-            3. Facebook Pages &amp; Instagram Graph API (OAuth)
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'WHATSAPP_STATUS_SHARE' ? 'btn btn-primary' : 'btn btn-secondary'}
-            onClick={() => setActiveTab('WHATSAPP_STATUS_SHARE')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <MessageCircle size={16} />
-            4. WhatsApp Status &amp; Enlaces ({distState.whatsappStatusItems.length})
-          </button>
+        <div style={{ marginTop: '1.1rem' }}>
+          <SegmentedTabs
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            ariaLabel="Secciones de Social y Marketplace"
+            items={[
+              {
+                id: 'MARKETPLACE_ASSISTED',
+                label: 'Marketplace',
+                icon: <Store size={15} />,
+                count: distState.marketplaceListings.length
+              },
+              {
+                id: 'SOCIAL_CALENDAR_PUBLISHER',
+                label: 'Calendario',
+                icon: <CalendarIcon size={15} />,
+                count: distState.calendarPublications.length
+              },
+              {
+                id: 'OFFICIAL_GRAPH_ADAPTERS',
+                label: 'Graph API OAuth',
+                icon: <Lock size={15} />
+              },
+              {
+                id: 'WHATSAPP_STATUS_SHARE',
+                label: 'WhatsApp Status',
+                icon: <MessageCircle size={15} />,
+                count: distState.whatsappStatusItems.length
+              }
+            ]}
+          />
         </div>
       </div>
 

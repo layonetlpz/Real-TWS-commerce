@@ -26,6 +26,12 @@ import {
 } from '../../services/authService';
 import { getSystemBaselineSummary } from '../../services/systemService';
 import { AuthPortalCard } from '../auth/AuthScreens';
+import {
+  GlassCard,
+  GlassDisclosure,
+  ModuleHeader,
+  SegmentedTabs
+} from '../../components/glass';
 import type {
   SecurityTestScenarioResult,
   UserProfile,
@@ -55,6 +61,8 @@ export function UsersSecurityModule() {
   } = useAuth();
   const { notify } = useNotifications();
   const baseline = getSystemBaselineSummary();
+
+  const [activeTab, setActiveTab] = useState<'PROFILE' | 'USERS' | 'SECURITY'>('PROFILE');
 
   // Lista real de usuarios desde public.profiles (cuando Supabase está conectado)
   const [managedProfiles, setManagedProfiles] = useState<UserProfile[]>([]);
@@ -193,511 +201,462 @@ export function UsersSecurityModule() {
   };
 
   return (
-    <div>
-      {/* 1. Cabecera de Seguridad y Estado de Sesión */}
-      <div
-        className="rtw-card rtw-card-gold-top"
-        style={{
-          background: 'linear-gradient(135deg, #0f141c 0%, #171e29 100%)',
-          color: '#f8fafc'
-        }}
-      >
+    <div className="module-container">
+      <ModuleHeader
+        variant="dark"
+        eyebrow="GESTIÓN · CUENTA Y ACCESOS"
+        title="Usuarios, Perfil y Seguridad"
+        subtitle="Administra tu sesión, roles del equipo y permisos por módulo."
+        actions={
+          userProfile ? (
+            <button
+              type="button"
+              className="rtw-btn rtw-btn-ghost-dark btn-sm"
+              onClick={() => void signOut()}
+            >
+              <LogOut size={14} />
+              Cerrar sesión
+            </button>
+          ) : undefined
+        }
+        bottomSlot={
+          <SegmentedTabs<'PROFILE' | 'USERS' | 'SECURITY'>
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { id: 'PROFILE', label: 'Mi Perfil', icon: <UserCog size={14} /> },
+              {
+                id: 'USERS',
+                label: 'Usuarios y Roles',
+                icon: <Users size={14} />,
+                count: managedProfiles.length
+              },
+              { id: 'SECURITY', label: 'Seguridad y Permisos', icon: <ShieldCheck size={14} /> }
+            ]}
+          />
+        }
+      />
+
+      {activeTab === 'PROFILE' && (
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px'
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gap: '20px'
           }}
         >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <ShieldCheck size={20} color="#d4af37" />
-              <span className="rtw-badge rtw-badge-gold">
-                AUTH & SECURITY — SUPABASE AUTH + POSTGRESQL RLS
-              </span>
+          <GlassCard>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <UserCog size={20} color="var(--rtw-gold-ink)" />
+              <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+                Tu perfil y rol activo
+              </h3>
             </div>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#d4af37' }}>
-              Centro de Autenticación, Perfil, Roles (RBAC) y Pruebas de Seguridad
-            </h2>
-            <p style={{ fontSize: '0.84rem', color: '#cbd5e1', marginTop: '2px' }}>
-              Validación en doble capa: Guardias de ruta/operación en cliente + Políticas Row Level Security (`FORCE ROW LEVEL SECURITY`) y funciones `SECURITY DEFINER` en PostgreSQL.
-            </p>
-          </div>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-primary"
-              onClick={handleExecuteAllSecurityTests}
+            {canInspectRoles && (
+              <div className="rtw-field" style={{ marginBottom: '14px' }}>
+                <label className="rtw-label" htmlFor="rbac-role-selector">
+                  Previsualizar vista como rol
+                </label>
+                <select
+                  id="rbac-role-selector"
+                  className="rtw-select"
+                  value={activeEffectiveRole}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as UserRole;
+                    setActiveRolePreview(nextRole === userProfile?.role ? null : nextRole);
+                    notify(
+                      'info',
+                      `Vista de rol: ${ROLES_CATALOG[nextRole].label}`,
+                      ROLES_CATALOG[nextRole].scopeRule
+                    );
+                  }}
+                >
+                  {ALL_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLES_CATALOG[r].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div
+              style={{
+                backgroundColor: 'var(--rtw-bg-subtle)',
+                border: '1px solid var(--rtw-border-light)',
+                borderRadius: '12px',
+                padding: '14px',
+                fontSize: '0.84rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
             >
-              <Play size={15} />
-              Ejecutar las 7 Pruebas de Seguridad
-            </button>
+              <div>
+                <strong>Rol activo:</strong>{' '}
+                <span className="rtw-badge rtw-badge-gold">
+                  {ROLES_CATALOG[activeEffectiveRole].shortBadge}
+                </span>
+              </div>
+              <div>
+                <strong>Alcance:</strong> {ROLES_CATALOG[activeEffectiveRole].scopeRule}
+              </div>
+              <div>
+                <strong>Propietario vinculado:</strong>{' '}
+                {activeEffectiveRole === 'OWNER'
+                  ? userProfile?.linkedOwnerId || 'Sin código asignado'
+                  : 'Acceso global de tienda'}
+              </div>
+            </div>
 
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline"
-              style={{ background: '#991b1b', color: '#ffffff', borderColor: '#f87171' }}
-              onClick={triggerSessionExpiredSimulation}
-            >
-              <KeyRound size={15} />
-              Verificar Bloqueo por Sesión Expirada
-            </button>
-
-            {userProfile && (
+            <div style={{ marginTop: '14px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                className="rtw-btn rtw-btn-outline"
-                onClick={() => void signOut()}
+                className="rtw-btn rtw-btn-outline btn-sm"
+                onClick={() => void handleTestPrivateDocument()}
               >
-                <LogOut size={15} />
-                Cerrar Sesión (Logout)
+                <Lock size={14} />
+                Verificar acceso a documentos
               </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Portal de Login / Recuperación + Inspector de Rol Activo */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: '20px',
-          marginBottom: '20px'
-        }}
-      >
-        <AuthPortalCard />
-
-        <section className="rtw-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-            <UserCog size={20} color="#d4af37" />
-            <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
-              Mi Perfil y Verificador de Roles RBAC (5 Roles Oficiales)
-            </h3>
-          </div>
-          <p style={{ fontSize: '0.8rem', color: '#475569', marginBottom: '12px' }}>
-            {canInspectRoles
-              ? 'Como Administrador puedes inspeccionar cómo actúa la aplicación bajo cada rol oficial sin modificar las políticas reales en base de datos.'
-              : 'Detalle de tu rol y alcance asignado por el administrador.'}
-          </p>
-
-          {canInspectRoles && (
-            <div className="rtw-field" style={{ marginBottom: '14px' }}>
-              <label className="rtw-label" htmlFor="rbac-role-selector">
-                Previsualizar vista bajo rol:
-              </label>
-              <select
-                id="rbac-role-selector"
-                className="rtw-select"
-                value={activeEffectiveRole}
-                onChange={(e) => {
-                  const nextRole = e.target.value as UserRole;
-                  setActiveRolePreview(nextRole === userProfile?.role ? null : nextRole);
-                  notify(
-                    'info',
-                    `Vista de rol: ${nextRole}`,
-                    ROLES_CATALOG[nextRole].scopeRule
-                  );
-                }}
+              <button
+                type="button"
+                className="rtw-btn rtw-btn-outline btn-sm"
+                onClick={triggerSessionExpiredSimulation}
               >
-                {ALL_ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLES_CATALOG[r].label}
-                  </option>
-                ))}
-              </select>
+                <KeyRound size={14} />
+                Simular sesión expirada
+              </button>
             </div>
-          )}
-
-          <div
-            style={{
-              backgroundColor: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '12px 14px',
-              fontSize: '0.82rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px'
-            }}
-          >
-            <div>
-              <strong>Rol Efectivo Actual:</strong>{' '}
-              <span className="rtw-badge rtw-badge-gold">
-                {ROLES_CATALOG[activeEffectiveRole].shortBadge}
-              </span>
-            </div>
-            <div>
-              <strong>Función Validadora en PostgreSQL:</strong>{' '}
-              <code>{ROLES_CATALOG[activeEffectiveRole].rlsHelperFunction}</code>
-            </div>
-            <div>
-              <strong>Regla de Alcance:</strong>{' '}
-              {ROLES_CATALOG[activeEffectiveRole].scopeRule}
-            </div>
-            <div>
-              <strong>Propietario Vinculado (RLS):</strong>{' '}
-              {activeEffectiveRole === 'OWNER'
-                ? (userProfile?.linkedOwnerId || 'Sin código asignado (requiere vinculación de administrador)')
-                : 'N/A (Rol interno de tienda)'}
-            </div>
-          </div>
-
-          <div style={{ marginTop: '14px' }}>
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-outline"
-              onClick={() => void handleTestPrivateDocument()}
-            >
-              <Lock size={15} />
-              Probar Acceso a Documento Privado (`private-documents`) con Rol Actual
-            </button>
             {privateDocStatus && (
               <div
                 style={{
-                  marginTop: '8px',
+                  marginTop: '10px',
                   fontSize: '0.78rem',
-                  padding: '8px 10px',
-                  borderRadius: '6px',
-                  backgroundColor: '#f1f5f9',
-                  color: '#1e293b',
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: 'var(--rtw-bg-subtle)',
+                  border: '1px solid var(--rtw-border-light)',
+                  color: 'var(--rtw-text-primary)',
                   fontWeight: 600
                 }}
               >
                 {privateDocStatus}
               </div>
             )}
-          </div>
-        </section>
-      </div>
+          </GlassCard>
 
-      {/* 3. Suite de las 7 Pruebas Obligatorias de Seguridad */}
-      <section className="rtw-card">
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '10px',
-            marginBottom: '14px'
-          }}
-        >
-          <div>
-            <h3 style={{ fontSize: '1.02rem', fontWeight: 800 }}>
-              Verificación Automatizada de las 7 Pruebas Obligatorias de Seguridad
+          <AuthPortalCard initialMode="UPDATE_PASSWORD" />
+        </div>
+      )}
+
+      {activeTab === 'USERS' && (
+        <GlassCard>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+            <Users size={20} color="var(--rtw-gold-ink)" />
+            <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
+              Gestión de Usuarios y Roles
             </h3>
-            <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
-              Valida que ninguna restricción dependa solo de ocultar botones: cada operación se valida en cliente y en PostgreSQL (RLS + Triggers + Funciones RPC).
-            </p>
           </div>
-          <span className="rtw-badge rtw-badge-success">
-            <CheckCircle2 size={14} />
-            {testResults.filter((t) => t.passed).length} / {testResults.length} Escenarios Bloqueados Correctamente
-          </span>
-        </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-secondary)', marginBottom: '16px' }}>
+            Asigna roles, vincula propietarios o activa cuentas desde un único formulario.
+          </p>
 
-        <div className="rtw-table-container">
-          <table className="rtw-table">
-            <thead>
-              <tr>
-                <th>Escenario de Prueba</th>
-                <th>Actor Evaluado</th>
-                <th>Acción Intentada</th>
-                <th>Resultado</th>
-                <th>Defensa en Cliente y Servidor (PostgreSQL RLS / RPC)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {testResults.map((test) => (
-                <tr key={test.id}>
-                  <td>
-                    <strong>{test.title}</strong>
-                  </td>
-                  <td>
-                    <span className="rtw-badge rtw-badge-gold">{test.simulatedActor}</span>
-                  </td>
-                  <td style={{ fontSize: '0.8rem' }}>{test.attemptedAction}</td>
-                  <td>
-                    <span
-                      className={`rtw-badge ${
-                        test.passed ? 'rtw-badge-success' : 'rtw-badge-danger'
-                      }`}
-                    >
-                      {test.actualOutcome} {test.passed ? '✓' : '✗'}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: '0.78rem' }}>
-                    <div>
-                      <strong>Guardia App:</strong> {test.clientGuardResult}
-                    </div>
-                    <div style={{ color: '#475569', marginTop: '2px' }}>
-                      <strong>Capa BD:</strong> <code>{test.dbRlsAndRpcResult}</code>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 4. Gestión Administrativa de Usuarios (Exclusivo ADMIN) */}
-      <section className="rtw-card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-          <Users size={20} color="#d4af37" />
-          <h3 style={{ fontSize: '1.02rem', fontWeight: 800 }}>
-            Gestión Administrativa de Usuarios y Asignación de Roles (Exclusivo ADMIN)
-          </h3>
-        </div>
-        <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '14px' }}>
-          Protegido en base de datos por el trigger <code>trg_prevent_profile_self_escalation</code> (evita autoasignación de roles) y la función RPC <code>public.fn_admin_update_user_role_and_access</code>.
-        </p>
-
-        {activeEffectiveRole !== 'ADMIN' ? (
-          <div
-            style={{
-              backgroundColor: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: '6px',
-              padding: '14px',
-              color: '#991b1b',
-              fontSize: '0.84rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}
-          >
-            <ShieldAlert size={20} />
-            <div>
-              <strong>Operación Protegida:</strong> Su rol actual (<code>{activeEffectiveRole}</code>) no tiene privilegios de administración de usuarios. En PostgreSQL, la función <code>public.fn_admin_update_user_role_and_access</code> rechaza cualquier llamada si <code>public.fn_is_admin() = false</code>.
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleAdminRoleSubmit} noValidate>
-            <div className="rtw-form-grid">
-              <div className="rtw-field">
-                <label className="rtw-label" htmlFor="admin-target-uid">
-                  UUID del Usuario (`public.profiles.id`) *
-                </label>
-                <input
-                  id="admin-target-uid"
-                  className="rtw-input"
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  value={targetUserId}
-                  onChange={(e) => setTargetUserId(e.target.value)}
-                />
-              </div>
-
-              <div className="rtw-field">
-                <label className="rtw-label" htmlFor="admin-new-role">
-                  Rol a Asignar (`public.app_role`) *
-                </label>
-                <select
-                  id="admin-new-role"
-                  className="rtw-select"
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as UserRole)}
-                >
-                  {ALL_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="rtw-field">
-                <label className="rtw-label" htmlFor="admin-linked-owner">
-                  Propietario Vinculado (Obligatorio si Rol = OWNER)
-                </label>
-                <select
-                  id="admin-linked-owner"
-                  className="rtw-select"
-                  value={linkedOwnerId}
-                  onChange={(e) => setLinkedOwnerId(e.target.value)}
-                  disabled={newRole !== 'OWNER'}
-                >
-                  <option value="">-- Seleccione propietario explícitamente --</option>
-                  {baseline.owners.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.internalCode} — {o.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="rtw-field">
-                <label className="rtw-label" htmlFor="admin-reason">
-                  Motivo de Auditoría *
-                </label>
-                <input
-                  id="admin-reason"
-                  className="rtw-input"
-                  placeholder="Ej. Habilitación de operador de bodega"
-                  value={adminReason}
-                  onChange={(e) => setAdminReason(e.target.value)}
-                />
-              </div>
-            </div>
-
+          {activeEffectiveRole !== 'ADMIN' ? (
             <div
               style={{
+                backgroundColor: 'var(--rtw-danger-bg)',
+                border: '1px solid var(--rtw-danger-border)',
+                borderRadius: '12px',
+                padding: '14px',
+                color: 'var(--rtw-danger-text)',
+                fontSize: '0.84rem',
                 display: 'flex',
-                gap: '18px',
-                flexWrap: 'wrap',
-                marginTop: '12px',
-                fontSize: '0.84rem'
+                alignItems: 'center',
+                gap: '10px'
               }}
             >
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <input
-                  type="checkbox"
-                  checked={isActiveAccount}
-                  onChange={(e) => setIsActiveAccount(e.target.checked)}
-                />
-                Cuenta Activa (`is_active = true`)
-              </label>
-
-              {newRole === 'OWNER' && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <input
-                    type="checkbox"
-                    checked={ownerPortalEnabled}
-                    onChange={(e) => setOwnerPortalEnabled(e.target.checked)}
-                  />
-                  Habilitar Acceso de Lectura al Portal del Propietario (`owner_portal_enabled`)
-                </label>
-              )}
+              <ShieldAlert size={20} />
+              <div>
+                <strong>Solo administradores:</strong> Tu rol actual no permite modificar permisos de otros usuarios.
+              </div>
             </div>
+          ) : (
+            <form onSubmit={handleAdminRoleSubmit} noValidate>
+              <div className="rtw-form-grid">
+                <div className="rtw-field">
+                  <label className="rtw-label" htmlFor="admin-target-uid">
+                    ID del Usuario *
+                  </label>
+                  <input
+                    id="admin-target-uid"
+                    className="rtw-input"
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    value={targetUserId}
+                    onChange={(e) => setTargetUserId(e.target.value)}
+                  />
+                </div>
 
-            {adminFormFeedback && (
+                <div className="rtw-field">
+                  <label className="rtw-label" htmlFor="admin-new-role">
+                    Rol asignado *
+                  </label>
+                  <select
+                    id="admin-new-role"
+                    className="rtw-select"
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value as UserRole)}
+                  >
+                    {ALL_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {ROLES_CATALOG[r]?.label ?? r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="rtw-field">
+                  <label className="rtw-label" htmlFor="admin-linked-owner">
+                    Propietario vinculado (si es Propietario)
+                  </label>
+                  <select
+                    id="admin-linked-owner"
+                    className="rtw-select"
+                    value={linkedOwnerId}
+                    onChange={(e) => setLinkedOwnerId(e.target.value)}
+                    disabled={newRole !== 'OWNER'}
+                  >
+                    <option value="">Selecciona un propietario...</option>
+                    {baseline.owners.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.internalCode} — {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="rtw-field">
+                  <label className="rtw-label" htmlFor="admin-reason">
+                    Motivo del cambio *
+                  </label>
+                  <input
+                    id="admin-reason"
+                    className="rtw-input"
+                    placeholder="Ej. Alta de operador de bodega"
+                    value={adminReason}
+                    onChange={(e) => setAdminReason(e.target.value)}
+                  />
+                </div>
+              </div>
+
               <div
                 style={{
-                  marginTop: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '6px',
-                  backgroundColor: '#fef9e7',
-                  border: '1px solid rgba(212, 175, 55, 0.45)',
-                  color: '#78350f',
-                  fontSize: '0.8rem',
-                  fontWeight: 600
+                  display: 'flex',
+                  gap: '18px',
+                  flexWrap: 'wrap',
+                  marginTop: '14px',
+                  fontSize: '0.84rem'
                 }}
               >
-                {adminFormFeedback}
-              </div>
-            )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                  <input
+                    type="checkbox"
+                    checked={isActiveAccount}
+                    onChange={(e) => setIsActiveAccount(e.target.checked)}
+                  />
+                  Cuenta activa
+                </label>
 
-            <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="submit" className="rtw-btn rtw-btn-primary">
-                Ejecutar Actualización Administrativa (RPC `fn_admin_update_user_role_and_access`)
+                {newRole === 'OWNER' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                    <input
+                      type="checkbox"
+                      checked={ownerPortalEnabled}
+                      onChange={(e) => setOwnerPortalEnabled(e.target.checked)}
+                    />
+                    Permitir acceso al portal de propietario
+                  </label>
+                )}
+              </div>
+
+              {adminFormFeedback && (
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--rtw-warning-bg)',
+                    border: '1px solid var(--rtw-warning-border)',
+                    color: 'var(--rtw-warning-text)',
+                    fontSize: '0.8rem',
+                    fontWeight: 600
+                  }}
+                >
+                  {adminFormFeedback}
+                </div>
+              )}
+
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" className="rtw-btn rtw-btn-primary">
+                  Guardar permisos
+                </button>
+              </div>
+            </form>
+          )}
+
+          {loadingProfiles && (
+            <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)', marginTop: '12px' }}>
+              Cargando usuarios...
+            </p>
+          )}
+          {managedProfiles.length > 0 && (
+            <div className="rtw-table-container" style={{ marginTop: '16px' }}>
+              <table className="rtw-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Correo</th>
+                    <th>Rol</th>
+                    <th>Propietario</th>
+                    <th>Estado</th>
+                    <th>ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {managedProfiles.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: 700 }}>{p.fullName}</td>
+                      <td>{p.email}</td>
+                      <td><span className="rtw-badge rtw-badge-gold">{p.role}</span></td>
+                      <td>{p.linkedOwnerId ?? '—'}</td>
+                      <td>
+                        <span className={`rtw-badge ${p.isActive ? 'rtw-badge-success' : 'rtw-badge-neutral'}`}>
+                          {p.isActive ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </td>
+                      <td><code className="rtw-mono" style={{ fontSize: '0.74rem' }}>{p.id}</code></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </GlassCard>
+      )}
+
+      {activeTab === 'SECURITY' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <GlassDisclosure
+            title="Matriz de permisos por módulo"
+            subtitle="Consulta qué puede leer o editar cada rol en los 25 módulos."
+            icon={<ShieldCheck size={16} />}
+            defaultOpen
+          >
+            <div className="rtw-table-container" style={{ marginTop: '14px' }}>
+              <table className="rtw-table">
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>Módulo</th>
+                    <th>Admin</th>
+                    <th>Inventario</th>
+                    <th>Ventas</th>
+                    <th>Marketing</th>
+                    <th>Propietario</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {NAVIGATION_ITEMS.map((item) => {
+                    const rule = ROUTE_PERMISSIONS[item.path];
+                    const renderCell = (role: UserRole) => {
+                      if (!rule) return '—';
+                      const canWrite = rule.allowedWriteRoles.includes(role);
+                      const canRead = rule.allowedReadRoles.includes(role);
+                      if (canWrite) {
+                        return <span className="rtw-badge rtw-badge-success">Lectura / Edición</span>;
+                      }
+                      if (canRead) {
+                        return (
+                          <span className="rtw-badge rtw-badge-info">
+                            {role === 'OWNER' && rule.ownerScopedOnlyForOwnerRole
+                              ? 'Solo propios'
+                              : 'Solo lectura'}
+                          </span>
+                        );
+                      }
+                      return <span className="rtw-badge rtw-badge-danger">Bloqueado</span>;
+                    };
+
+                    return (
+                      <tr key={item.id}>
+                        <td style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--rtw-text-muted)' }}>
+                          {item.group}
+                        </td>
+                        <td><strong>{item.label}</strong></td>
+                        <td>{renderCell('ADMIN')}</td>
+                        <td>{renderCell('INVENTORY_OPERATOR')}</td>
+                        <td>{renderCell('SALES_OPERATOR')}</td>
+                        <td>{renderCell('MARKETING_OPERATOR')}</td>
+                        <td>{renderCell('OWNER')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </GlassDisclosure>
+
+          <GlassDisclosure
+            title="Pruebas automáticas de seguridad"
+            subtitle="Verifica los 7 escenarios obligatorios de bloqueo por rol."
+            icon={<Lock size={16} />}
+            badge={
+              <span className="rtw-badge rtw-badge-success">
+                <CheckCircle2 size={13} />
+                {testResults.filter((t) => t.passed).length}/{testResults.length}
+              </span>
+            }
+          >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '12px 0' }}>
+              <button
+                type="button"
+                className="rtw-btn rtw-btn-primary btn-sm"
+                onClick={handleExecuteAllSecurityTests}
+              >
+                <Play size={14} />
+                Ejecutar pruebas
               </button>
             </div>
-          </form>
-        )}
-
-        {loadingProfiles && (
-          <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '10px' }}>
-            Consultando perfiles reales en `public.profiles`...
-          </p>
-        )}
-        {managedProfiles.length > 0 && (
-          <div className="rtw-table-container" style={{ marginTop: '14px' }}>
-            <table className="rtw-table">
-              <thead>
-                <tr>
-                  <th>UUID</th>
-                  <th>Nombre</th>
-                  <th>Correo</th>
-                  <th>Rol</th>
-                  <th>Propietario Vinculado</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {managedProfiles.map((p) => (
-                  <tr key={p.id}>
-                    <td><code>{p.id}</code></td>
-                    <td>{p.fullName}</td>
-                    <td>{p.email}</td>
-                    <td><span className="rtw-badge rtw-badge-gold">{p.role}</span></td>
-                    <td>{p.linkedOwnerId ?? '—'}</td>
-                    <td>{p.isActive ? 'Activo' : 'Inactivo'}</td>
+            <div className="rtw-table-container">
+              <table className="rtw-table">
+                <thead>
+                  <tr>
+                    <th>Escenario</th>
+                    <th>Actor</th>
+                    <th>Acción</th>
+                    <th>Estado</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* 5. Matriz de Permisos por Módulo (25 Rutas x 5 Roles) */}
-      <section className="rtw-card">
-        <h3 style={{ fontSize: '1.02rem', fontWeight: 800, marginBottom: '4px' }}>
-          Matriz Oficial de Permisos por Módulo y Rol (25 Módulos × 5 Roles)
-        </h3>
-        <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '12px' }}>
-          Refleja exactamente las políticas de acceso en <code>ProtectedRoute.tsx</code> y las políticas RLS de <code>0008_rls_policies_and_storage.sql</code>.
-        </p>
-
-        <div className="rtw-table-container">
-          <table className="rtw-table">
-            <thead>
-              <tr>
-                <th>Grupo</th>
-                <th>Módulo</th>
-                <th>ADMIN</th>
-                <th>INVENTORY_OPERATOR</th>
-                <th>SALES_OPERATOR</th>
-                <th>MARKETING_OPERATOR</th>
-                <th>OWNER (Con Portal Activo)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {NAVIGATION_ITEMS.map((item) => {
-                const rule = ROUTE_PERMISSIONS[item.path];
-                const renderCell = (role: UserRole) => {
-                  if (!rule) return '—';
-                  const canWrite = rule.allowedWriteRoles.includes(role);
-                  const canRead = rule.allowedReadRoles.includes(role);
-                  if (canWrite) {
-                    return <span className="rtw-badge rtw-badge-success">Lectura / Escritura</span>;
-                  }
-                  if (canRead) {
-                    return (
-                      <span className="rtw-badge rtw-badge-info">
-                        {role === 'OWNER' && rule.ownerScopedOnlyForOwnerRole
-                          ? 'Solo Propios (RLS)'
-                          : 'Solo Lectura'}
-                      </span>
-                    );
-                  }
-                  return <span className="rtw-badge rtw-badge-danger">Bloqueado</span>;
-                };
-
-                return (
-                  <tr key={item.id}>
-                    <td style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>
-                      {item.group}
-                    </td>
-                    <td>
-                      <strong>{item.label}</strong>
-                    </td>
-                    <td>{renderCell('ADMIN')}</td>
-                    <td>{renderCell('INVENTORY_OPERATOR')}</td>
-                    <td>{renderCell('SALES_OPERATOR')}</td>
-                    <td>{renderCell('MARKETING_OPERATOR')}</td>
-                    <td>{renderCell('OWNER')}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {testResults.map((test) => (
+                    <tr key={test.id}>
+                      <td><strong>{test.title}</strong></td>
+                      <td><span className="rtw-badge rtw-badge-gold">{test.simulatedActor}</span></td>
+                      <td style={{ fontSize: '0.8rem' }}>{test.attemptedAction}</td>
+                      <td>
+                        <span className={`rtw-badge ${test.passed ? 'rtw-badge-success' : 'rtw-badge-danger'}`}>
+                          {test.actualOutcome} {test.passed ? '✓' : '✗'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </GlassDisclosure>
         </div>
-      </section>
+      )}
     </div>
   );
 }

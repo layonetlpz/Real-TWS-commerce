@@ -1,8 +1,10 @@
-import { NavLink } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { NAV_GROUPS, NAVIGATION_ITEMS } from '../lib/navigation';
 import { ROUTE_PERMISSIONS, ROLES_CATALOG } from '../lib/permissions';
 import { useAuth } from '../hooks/useAuth';
+import type { NavGroupId } from '../types/domain';
 import { LucideIcon } from './LucideIcon';
 
 interface SidebarProps {
@@ -18,8 +20,31 @@ export function Sidebar({
   mobileOpen,
   onCloseMobile
 }: SidebarProps) {
+  const location = useLocation();
   const { activeEffectiveRole, userProfile, canInspectRoles, activeRolePreview, setActiveRolePreview } =
     useAuth();
+
+  const currentNav = NAVIGATION_ITEMS.find((item) => item.path === location.pathname);
+
+  const [openGroups, setOpenGroups] = useState<Record<NavGroupId, boolean>>({
+    OPERACIONES: true,
+    FINANZAS: true,
+    COMERCIAL: true,
+    MARKETING: false,
+    GESTIÓN: true
+  });
+
+  useEffect(() => {
+    if (currentNav) {
+      setOpenGroups((prev) =>
+        prev[currentNav.group] ? prev : { ...prev, [currentNav.group]: true }
+      );
+    }
+  }, [currentNav]);
+
+  const toggleGroup = (group: NavGroupId) => {
+    setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }));
+  };
 
   const sidebarClasses = [
     'rtw-sidebar',
@@ -43,40 +68,35 @@ export function Sidebar({
         <div className="rtw-brand-header">
           <NavLink to="/" className="rtw-brand-logo" onClick={onCloseMobile}>
             <span className="rtw-brand-badge">RT</span>
-            {!collapsed && <span>REAL TWS</span>}
+            {!collapsed && (
+              <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                <span style={{ color: '#f8fafc', fontWeight: 800, letterSpacing: '0.06em' }}>
+                  REAL TWS
+                </span>
+                <span style={{ fontSize: '0.62rem', color: 'rgba(232, 199, 102, 0.8)', fontWeight: 600 }}>
+                  COMMERCE SYSTEM
+                </span>
+              </span>
+            )}
           </NavLink>
 
           <button
             type="button"
-            className="rtw-btn rtw-btn-outline rtw-desktop-only"
-            style={{
-              padding: '4px 6px',
-              minHeight: '30px',
-              background: 'transparent',
-              color: '#d4af37',
-              borderColor: 'rgba(212, 175, 55, 0.35)'
-            }}
+            className="rtw-sidebar-toggle rtw-desktop-only"
             onClick={onToggleCollapse}
-            title={collapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'}
+            title={collapsed ? 'Expandir menú' : 'Contraer menú'}
             aria-label={collapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'}
           >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
           </button>
 
           <button
             type="button"
-            className="rtw-btn rtw-btn-outline rtw-mobile-only"
-            style={{
-              padding: '4px 6px',
-              minHeight: '30px',
-              background: 'transparent',
-              color: '#d4af37',
-              borderColor: 'rgba(212, 175, 55, 0.35)'
-            }}
+            className="rtw-sidebar-toggle rtw-mobile-only"
             onClick={onCloseMobile}
             aria-label="Cerrar menú móvil"
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
@@ -89,27 +109,45 @@ export function Sidebar({
             });
 
             if (items.length === 0) return null;
+            const isExpanded = collapsed || openGroups[group];
 
             return (
               <div key={group} className="rtw-nav-group">
                 {!collapsed && (
-                  <div className="rtw-nav-group-title">{group}</div>
-                )}
-                {items.map((item) => (
-                  <NavLink
-                    key={item.id}
-                    to={item.path}
-                    end={item.path === '/'}
-                    onClick={onCloseMobile}
-                    title={collapsed ? `${group}: ${item.label}` : undefined}
-                    className={({ isActive }) =>
-                      `rtw-nav-link ${isActive ? 'active' : ''}`
-                    }
+                  <button
+                    type="button"
+                    className="rtw-nav-group-header"
+                    onClick={() => toggleGroup(group)}
+                    aria-expanded={isExpanded}
                   >
-                    <LucideIcon name={item.iconName} size={17} />
-                    {!collapsed && <span>{item.label}</span>}
-                  </NavLink>
-                ))}
+                    <span>{group}</span>
+                    <ChevronDown
+                      size={13}
+                      style={{
+                        opacity: 0.7,
+                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        transition: 'transform 0.2s var(--ease-spring)'
+                      }}
+                    />
+                  </button>
+                )}
+
+                {isExpanded &&
+                  items.map((item) => (
+                    <NavLink
+                      key={item.id}
+                      to={item.path}
+                      end={item.path === '/'}
+                      onClick={onCloseMobile}
+                      title={collapsed ? `${group}: ${item.label}` : undefined}
+                      className={({ isActive }) =>
+                        `rtw-nav-link ${isActive ? 'active' : ''}`
+                      }
+                    >
+                      <LucideIcon name={item.iconName} size={17} />
+                      {!collapsed && <span>{item.label}</span>}
+                    </NavLink>
+                  ))}
               </div>
             );
           })}
@@ -117,20 +155,52 @@ export function Sidebar({
 
         {!collapsed && userProfile && (
           <div className="rtw-sidebar-footer">
-            <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.78rem' }}>
-              {userProfile.fullName}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+              <span
+                style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '999px',
+                  background: 'rgba(212, 175, 55, 0.20)',
+                  border: '1px solid rgba(212, 175, 55, 0.45)',
+                  color: '#e8c766',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  fontSize: '0.75rem',
+                  flexShrink: 0
+                }}
+              >
+                {userProfile.fullName.slice(0, 2).toUpperCase()}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    color: '#f8fafc',
+                    fontSize: '0.79rem',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {userProfile.fullName}
+                </div>
+                <div style={{ fontSize: '0.71rem', color: 'rgba(203, 213, 225, 0.78)' }}>
+                  {ROLES_CATALOG[activeEffectiveRole]?.label ?? activeEffectiveRole}
+                </div>
+              </div>
             </div>
-            <div>
-              {ROLES_CATALOG[activeEffectiveRole]?.label ?? activeEffectiveRole}
-            </div>
+
             {canInspectRoles && activeRolePreview && (
               <button
                 type="button"
                 className="rtw-btn rtw-btn-gold btn-sm"
-                style={{ marginTop: '6px' }}
+                style={{ marginTop: '8px', width: '100%' }}
                 onClick={() => setActiveRolePreview(null)}
               >
-                Salir de vista previa ({activeRolePreview})
+                Salir de vista ({activeRolePreview})
               </button>
             )}
           </div>

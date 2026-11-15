@@ -4,6 +4,7 @@ import type { NavItemConfig, TableColumn } from '../../types/domain';
 import { PendingModuleBanner } from '../../components/StatusStates';
 import { FilterBar } from '../../components/FilterBar';
 import { DataTable } from '../../components/DataTable';
+import { GlassDisclosure } from '../../components/glass';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { ExcelImportModule } from '../import/ExcelImportModule';
 import {
@@ -134,7 +135,7 @@ export function ModuleBlueprintView({ moduleConfig }: ModuleBlueprintViewProps) 
   }, [moduleConfig]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="rtw-stack-lg">
       {showImportEngineHere && <ExcelImportModule />}
 
       {!showImportEngineHere && (
@@ -145,93 +146,84 @@ export function ModuleBlueprintView({ moduleConfig }: ModuleBlueprintViewProps) 
         />
       )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          gap: '16px'
-        }}
+      <GlassDisclosure
+        title="Arquitectura y reglas del módulo"
+        subtitle={`Fase ${moduleConfig.phaseNumber} · ${moduleConfig.supabaseTables.length} tablas Supabase`}
       >
-        <section className="rtw-card">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '10px'
-            }}
-          >
-            <Database size={18} color="#d4af37" />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800 }}>
-              Tablas Objetivo en Supabase (Fase {moduleConfig.phaseNumber})
-            </h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '16px',
+            marginTop: '8px'
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <Database size={16} color="#b8891b" />
+              <h4 style={{ fontSize: '0.88rem', fontWeight: 700, margin: 0 }}>
+                Tablas objetivo (Supabase)
+              </h4>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {moduleConfig.supabaseTables.map((table) => (
+                <span key={table} className="rtw-badge rtw-badge-gold">
+                  public.{table}
+                </span>
+              ))}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)', marginTop: '8px' }}>
+              Propietario activo:{' '}
+              <strong>
+                {selectedOwnerScope === 'ALL' ? 'Consolidado' : `${selectedOwnerScope} (Eberto)`}
+              </strong>
+            </p>
           </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {moduleConfig.supabaseTables.map((table) => (
-              <span key={table} className="rtw-badge rtw-badge-gold">
-                public.{table}
-              </span>
-            ))}
-          </div>
-          <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '10px' }}>
-            Alcance Multipropietario activo en cabecera:{' '}
-            <strong>
-              {selectedOwnerScope === 'ALL'
-                ? 'Consolidado (Todos los propietarios)'
-                : `${selectedOwnerScope} (Eberto)`}
-            </strong>
-          </p>
-        </section>
 
-        <section className="rtw-card">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '10px'
-            }}
-          >
-            <ShieldCheck size={18} color="#166534" />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800 }}>
-              Reglas de Negocio Obligatorias en este Módulo
-            </h3>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <ShieldCheck size={16} color="#166534" />
+              <h4 style={{ fontSize: '0.88rem', fontWeight: 700, margin: 0 }}>
+                Reglas de negocio
+              </h4>
+            </div>
+            <ul
+              style={{
+                paddingLeft: '18px',
+                fontSize: '0.82rem',
+                color: 'var(--rtw-text-secondary)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px',
+                margin: 0
+              }}
+            >
+              {moduleConfig.enforcedRules.map((rule) => (
+                <li key={rule}>{rule}</li>
+              ))}
+            </ul>
           </div>
-          <ul
-            style={{
-              paddingLeft: '18px',
-              fontSize: '0.83rem',
-              color: '#334155',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px'
-            }}
-          >
-            {moduleConfig.enforcedRules.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
-        </section>
-      </div>
+        </div>
+      </GlassDisclosure>
 
       <section className="rtw-card">
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
+            gap: '10px',
             marginBottom: '12px'
           }}
         >
           <Layers size={18} color="#171e29" />
           <div>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800 }}>
-              Estructura Oficial de Tabla — {moduleConfig.label}
+            <h3 style={{ fontSize: '0.96rem', fontWeight: 750, margin: 0 }}>
+              {moduleConfig.label}
             </h3>
-            <p style={{ fontSize: '0.78rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)', margin: '2px 0 0' }}>
               {moduleSupportsImportedData && importedRows.length > 0
-                ? `Mostrando ${importedRows.length} registros reales importados por el EXCEL IMPORT ENGINE.`
-                : `Esquema preparado para conexión con Supabase en la Fase ${moduleConfig.phaseNumber}. No se muestran registros ficticios.`}
+                ? `${importedRows.length} registros reales disponibles.`
+                : `Vista preparada para Fase ${moduleConfig.phaseNumber} sin datos ficticios.`}
             </p>
           </div>
         </div>

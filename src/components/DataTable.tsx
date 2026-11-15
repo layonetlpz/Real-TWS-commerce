@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { TableColumn } from '../types/domain';
-import { ErrorState } from './StatusStates';
+import { EmptyState, ErrorState } from './StatusStates';
 
 interface DataTableProps<T> {
   columns: TableColumn<T>[];
@@ -11,6 +11,7 @@ interface DataTableProps<T> {
   error?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
+  emptyAction?: ReactNode;
   onRetry?: () => void;
   pageSize?: number;
   mobileTitle?: (row: T) => ReactNode;
@@ -23,7 +24,8 @@ export function DataTable<T>({
   loading = false,
   error = null,
   emptyTitle = 'Sin registros para mostrar',
-  emptyDescription = 'No se encontraron datos comerciales que coincidan con los criterios actuales.',
+  emptyDescription = 'Ajusta los filtros o agrega un nuevo registro para empezar.',
+  emptyAction,
   onRetry,
   pageSize = 15,
   mobileTitle
@@ -78,7 +80,7 @@ export function DataTable<T>({
     return (
       <div className="rtw-card" role="status" aria-label="Cargando tabla">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div className="rtw-skeleton" style={{ height: '32px', width: '100%' }} />
+          <div className="rtw-skeleton" style={{ height: '34px', width: '100%' }} />
           <div className="rtw-skeleton" style={{ height: '24px', width: '96%' }} />
           <div className="rtw-skeleton" style={{ height: '24px', width: '92%' }} />
           <div className="rtw-skeleton" style={{ height: '24px', width: '98%' }} />
@@ -89,6 +91,16 @@ export function DataTable<T>({
 
   if (error) {
     return <ErrorState message={error} onRetry={onRetry} />;
+  }
+
+  if (pageData.length === 0) {
+    return (
+      <EmptyState
+        title={emptyTitle}
+        description={emptyDescription}
+        action={emptyAction}
+      />
+    );
   }
 
   return (
@@ -115,6 +127,8 @@ export function DataTable<T>({
                           border: 'none',
                           color: 'inherit',
                           font: 'inherit',
+                          textTransform: 'inherit',
+                          letterSpacing: 'inherit',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '6px',
@@ -126,7 +140,7 @@ export function DataTable<T>({
                         {isSorted ? (
                           sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
                         ) : (
-                          <ArrowUpDown size={12} style={{ opacity: 0.65 }} />
+                          <ArrowUpDown size={12} style={{ opacity: 0.6 }} />
                         )}
                       </button>
                     ) : (
@@ -138,98 +152,64 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {pageData.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  style={{
-                    padding: '28px 18px',
-                    textAlign: 'center',
-                    backgroundColor: '#f8fafc'
-                  }}
-                >
-                  <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
-                    {emptyTitle}
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: '#64748b' }}>
-                    {emptyDescription}
-                  </div>
-                </td>
+            {pageData.map((row, idx) => (
+              <tr key={rowKey(row, startIdx + idx)}>
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    style={{ textAlign: col.align ?? 'left' }}
+                  >
+                    {col.render(row)}
+                  </td>
+                ))}
               </tr>
-            ) : (
-              pageData.map((row, idx) => (
-                <tr key={rowKey(row, startIdx + idx)}>
-                  {columns.map((col) => (
-                    <td
-                      key={col.key}
-                      style={{ textAlign: col.align ?? 'left' }}
-                    >
-                      {col.render(row)}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
+            ))}
           </tbody>
         </table>
       </div>
 
       {/* Vista en tarjetas para pantallas móviles */}
       <div className="rtw-mobile-cards">
-        {pageData.length === 0 ? (
-          <div
-            className="rtw-card"
-            style={{ textAlign: 'center', backgroundColor: '#f8fafc' }}
-          >
-            <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
-              {emptyTitle}
-            </div>
-            <div style={{ fontSize: '0.82rem', color: '#64748b' }}>
-              {emptyDescription}
+        {pageData.map((row, idx) => (
+          <div key={rowKey(row, startIdx + idx)} className="rtw-card">
+            {mobileTitle && (
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.92rem',
+                  marginBottom: '10px',
+                  paddingBottom: '8px',
+                  borderBottom: '1px solid var(--rtw-border-light)'
+                }}
+              >
+                {mobileTitle(row)}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              {columns
+                .filter((col) => !col.hideOnMobile)
+                .map((col) => (
+                  <div
+                    key={col.key}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: '12px',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <span style={{ color: 'var(--rtw-text-muted)', fontWeight: 600 }}>
+                      {col.header}
+                    </span>
+                    <span style={{ textAlign: 'right', fontWeight: 500 }}>
+                      {col.render(row)}
+                    </span>
+                  </div>
+                ))}
             </div>
           </div>
-        ) : (
-          pageData.map((row, idx) => (
-            <div key={rowKey(row, startIdx + idx)} className="rtw-card" style={{ marginBottom: 0 }}>
-              {mobileTitle && (
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: '0.92rem',
-                    marginBottom: '8px',
-                    paddingBottom: '6px',
-                    borderBottom: '1px solid var(--rtw-border-light)'
-                  }}
-                >
-                  {mobileTitle(row)}
-                </div>
-              )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                {columns
-                  .filter((col) => !col.hideOnMobile)
-                  .map((col) => (
-                    <div
-                      key={col.key}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
-                        gap: '12px',
-                        fontSize: '0.82rem'
-                      }}
-                    >
-                      <span style={{ color: 'var(--rtw-text-muted)', fontWeight: 600 }}>
-                        {col.header}
-                      </span>
-                      <span style={{ textAlign: 'right', fontWeight: 500 }}>
-                        {col.render(row)}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          ))
-        )}
+        ))}
       </div>
 
       {sortedData.length > effectivePageSize && (
@@ -237,7 +217,7 @@ export function DataTable<T>({
           <span>
             Mostrando <strong>{startIdx + 1}</strong>–
             <strong>{Math.min(startIdx + effectivePageSize, sortedData.length)}</strong> de{' '}
-            <strong>{sortedData.length}</strong> registros
+            <strong>{sortedData.length}</strong>
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button
@@ -249,8 +229,8 @@ export function DataTable<T>({
               <ChevronLeft size={14} />
               Anterior
             </button>
-            <span style={{ fontSize: '0.78rem', padding: '0 6px' }}>
-              Página {safePage} de {totalPages}
+            <span style={{ fontSize: '0.78rem', padding: '0 6px', fontWeight: 600 }}>
+              {safePage} / {totalPages}
             </span>
             <button
               type="button"

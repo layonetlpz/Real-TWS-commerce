@@ -34,6 +34,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotifications } from '../../hooks/useNotifications';
+import { SegmentedTabs } from '../../components/glass';
 import { formatCOP } from '../../utils/formatters';
 
 type MetaAdsTab =
@@ -409,16 +410,9 @@ export const MetaAdsControlModule: React.FC = () => {
   };
 
   return (
-    <div className="module-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="module-container rtw-stack-lg">
       {/* Cabecera Ejecutiva */}
-      <div
-        className="card"
-        style={{
-          background: 'linear-gradient(135deg, #0D0E12 0%, #151821 100%)',
-          border: '1px solid rgba(212, 175, 55, 0.38)',
-          padding: '1.5rem'
-        }}
-      >
+      <div className="card rtw-glass-dark" style={{ padding: '1.35rem 1.5rem' }}>
         <div
           style={{
             display: 'flex',
@@ -429,54 +423,34 @@ export const MetaAdsControlModule: React.FC = () => {
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-              <Megaphone size={22} color="#D4AF37" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.3rem' }}>
+              <Megaphone size={18} color="#D4AF37" />
               <span
                 style={{
                   color: '#D4AF37',
-                  fontSize: '0.78rem',
+                  fontSize: '0.72rem',
                   fontWeight: 700,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase'
                 }}
               >
-                CONTROL DE CAMPAÑAS Y RENTABILIDAD META ADS
+                Meta Ads &amp; Rentabilidad
               </span>
             </div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#F9FAFB', margin: 0 }}>
-              Control de Campañas, Conjuntos, Anuncios, CPA, ROAS, Contribución y Rentabilidad Multipropietario
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 750, color: '#F9FAFB', margin: 0, letterSpacing: '-0.02em' }}>
+              Campañas, CPA y ROAS Multipropietario
             </h1>
-            <p style={{ color: '#9CA3AF', marginTop: '0.35rem', fontSize: '0.9rem' }}>
-              Separa estrictamente conversaciones de WhatsApp de compras reales verificadas, distingue datos manuales de datos sincronizados y protege a los propietarios contra descuentos sin acuerdo o autorización.
+            <p style={{ color: '#9CA3AF', marginTop: '0.3rem', fontSize: '0.88rem' }}>
+              Separa conversaciones de ventas verificadas y protege la rentabilidad por propietario.
             </p>
           </div>
 
           <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <span
-              className="badge"
-              style={{
-                background: 'rgba(16, 185, 129, 0.15)',
-                color: '#10B981',
-                border: '1px solid #10B981',
-                padding: '0.45rem 0.8rem',
-                fontWeight: 700
-              }}
-            >
-              🛡️ Cero Gasto Automático • Cero Creación sin Humano
+            <span className="rtw-badge badge-success">
+              Sin gasto automático
             </span>
-            <span
-              className="badge"
-              style={{
-                background:
-                  smartAlerts.length > 0
-                    ? 'rgba(245, 158, 11, 0.16)'
-                    : 'rgba(212, 175, 55, 0.16)',
-                color: smartAlerts.length > 0 ? '#F59E0B' : '#F3E5AB',
-                border: '1px solid currentColor',
-                padding: '0.45rem 0.8rem'
-              }}
-            >
-              Alertas Activas: {smartAlerts.length}
+            <span className={`rtw-badge ${smartAlerts.length > 0 ? 'badge-warning' : 'badge-gold'}`}>
+              Alertas: {smartAlerts.length}
             </span>
           </div>
         </div>
@@ -554,56 +528,37 @@ export const MetaAdsControlModule: React.FC = () => {
         </div>
 
         {/* Pestañas */}
-        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1.2rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={
-              activeTab === 'DASHBOARD_AND_CAMPAIGNS' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('DASHBOARD_AND_CAMPAIGNS')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Layers size={16} />
-            1. Campañas, Conjuntos, Anuncios y Alertas ({adsState.campaigns.length})
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'METRICS_AND_CSV_IMPORT' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('METRICS_AND_CSV_IMPORT')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Upload size={16} />
-            2. Resultados, Conversiones e Importador CSV ({adsState.metrics.length})
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'PROFITABILITY_AND_MULTIOWNER'
-                ? 'btn btn-primary'
-                : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('PROFITABILITY_AND_MULTIOWNER')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <TrendingUp size={16} />
-            3. Rentabilidad por Producto, Propietario y Canal
-          </button>
-
-          <button
-            type="button"
-            className={
-              activeTab === 'FUTURE_API_AND_HISTORY' ? 'btn btn-primary' : 'btn btn-secondary'
-            }
-            onClick={() => setActiveTab('FUTURE_API_AND_HISTORY')}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
-          >
-            <Lock size={16} />
-            4. Adaptador Meta Marketing API (Inactivo) &amp; Historial
-          </button>
+        <div style={{ marginTop: '1.1rem' }}>
+          <SegmentedTabs
+            variant="dark"
+            value={activeTab}
+            onChange={setActiveTab}
+            ariaLabel="Secciones de Meta Ads"
+            items={[
+              {
+                id: 'DASHBOARD_AND_CAMPAIGNS',
+                label: 'Campañas',
+                icon: <Layers size={15} />,
+                count: adsState.campaigns.length
+              },
+              {
+                id: 'METRICS_AND_CSV_IMPORT',
+                label: 'Métricas y CSV',
+                icon: <Upload size={15} />,
+                count: adsState.metrics.length
+              },
+              {
+                id: 'PROFITABILITY_AND_MULTIOWNER',
+                label: 'Rentabilidad',
+                icon: <TrendingUp size={15} />
+              },
+              {
+                id: 'FUTURE_API_AND_HISTORY',
+                label: 'API e Historial',
+                icon: <Lock size={15} />
+              }
+            ]}
+          />
         </div>
       </div>
 
