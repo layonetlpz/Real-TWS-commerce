@@ -1,1 +1,1 @@
-/* /index.html 200
+# El enrutamiento SPA se resuelve mediante assets.not_found_handling = "single-page-application" en wrangler.jsonc

@@ -2,7 +2,7 @@
 
 **Sistema:** REAL TWS COMMERCE SYSTEM  
 **Stack Frontend:** React 18 + TypeScript + Vite 6 (`dist/`)  
-**Hosting:** Cloudflare Pages (conectado a GitHub)  
+**Hosting:** Cloudflare Workers Static Assets (conectado a GitHub)  
 **Backend / BD / Auth / Storage:** Supabase (PostgreSQL + RLS + Auth + Storage + Edge Functions)
 
 ---
@@ -19,18 +19,17 @@
 
 ---
 
-## 2. CONFIGURACIÓN DE CLOUDFLARE PAGES
+## 2. CONFIGURACIÓN DE CLOUDFLARE (WORKERS STATIC ASSETS)
 
-1. Conectar el repositorio de **GitHub** en **Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git**.
-2. Configurar los parámetros de compilación (reflejados también en `wrangler.jsonc`):
+1. Conectar el repositorio de **GitHub** en **Cloudflare Dashboard → Workers & Pages → Create → Import a repository**.
+2. Configurar los parámetros de compilación y despliegue (reflejados en `wrangler.jsonc`):
    - **Production branch:** `main`
-   - **Preview deployments:** Habilitado para Pull Requests y ramas de desarrollo (nunca apuntar Previews a la BD de producción; usar proyecto Supabase de staging/preview).
    - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
+   - **Deploy command:** `npx wrangler deploy`
+   - **Build output directory (en `wrangler.jsonc`):** `assets.directory = "./dist"` con `not_found_handling = "single-page-application"`
    - **Environment variable de compilación:** `NODE_VERSION = 20`
-   - **Comando CLI manual (opcional si autenticas `wrangler`):** `npx wrangler pages deploy dist --project-name real-tws-commerce-system`
 3. **Rutas SPA y Cabeceras de Seguridad:**
-   - El archivo `public/_redirects` (`/* /index.html 200`) garantiza que todas las rutas de React Router (`/operaciones/inventario`, `/finanzas/liquidaciones`, `/gestion/analitica`, etc.) respondan `200 OK` al recargar.
+   - `wrangler.jsonc` define `"not_found_handling": "single-page-application"` para que todas las rutas de React Router (`/operaciones/inventario`, `/finanzas/liquidaciones`, `/gestion/analitica`, etc.) respondan `200 OK` sirviendo `index.html` al recargar.
    - El archivo `public/_headers` aplica `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` y `Cache-Control: no-cache` para `index.html` y `sw.js`.
 4. **Control de Despliegue a Producción:**
    - Activar protección de rama en GitHub sobre `main` (requerir revisión y build exitoso antes de mergear).
