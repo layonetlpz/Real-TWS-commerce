@@ -1,0 +1,18 @@
+# Migraciones SQL Numeradas — REAL TWS COMMERCE SYSTEM
+
+Este directorio contiene el diseño completo y aditivo de base de datos para **PostgreSQL 15+ y Supabase**.
+> **Estado actual:** Archivos SQL generados y documentados. **No se han ejecutado aún contra ninguna instancia de base de datos**, cumpliendo la instrucción de revisión previa.
+
+## Orden Oficial de Instalación
+
+1. [`0001_extensions_enums_and_helpers.sql`](./0001_extensions_enums_and_helpers.sql) — Extensión `pgcrypto`, enum `public.app_role` (`administrador`, `operador`, `vendedor`, `propietario`), función explícita `public.fn_set_updated_at()` y función de inmutabilidad `public.fn_prevent_ledger_mutation()`.
+2. [`0002_identity_owners_and_catalog.sql`](./0002_identity_owners_and_catalog.sql) — Tablas `owners`, `profiles`, funciones de seguridad RLS (`fn_current_user_role`, `fn_is_admin`, `fn_is_operator_or_admin`, `fn_is_sales_or_above`, `fn_can_owner_view`), `owner_agreements`, `products`, `product_variants`, `suppliers` y `price_history`.
+3. [`0003_purchases_inventory_and_quality.sql`](./0003_purchases_inventory_and_quality.sql) — Tablas `purchase_receipts`, `purchase_receipt_lines`, `stock_lots`, `lot_owner_allocations`, `stock_movements` (kardex inmutable), `quality_inspections`, `stock_reservations`, `cost_records`, `ownership_transfers` e `inventory_incidences`.
+4. [`0004_commercial_sales_and_logistics.sql`](./0004_commercial_sales_and_logistics.sql) — Tablas `customers`, `leads`, `sales_orders`, `sales_order_items`, `sales_item_allocations`, `payments`, `returns` y `shipments`.
+5. [`0005_finance_expenses_and_settlements.sql`](./0005_finance_expenses_and_settlements.sql) — Tablas `expenses`, `expense_allocations` y `owner_settlements`.
+6. [`0006_marketing_automation_and_audit.sql`](./0006_marketing_automation_and_audit.sql) — Tablas `marketing_assets`, `content_calendar`, `publications`, `social_connections`, `ads_campaigns`, `ads_campaign_metrics`, `automation_jobs`, `automation_logs`, `audit_logs` y función/triggers de auditoría `fn_record_audit_log()`.
+7. [`0007_views_and_transactional_functions.sql`](./0007_views_and_transactional_functions.sql) — Vistas operativas/financieras (`v_inventory_consolidated_by_sku`, `v_inventory_by_owner_and_lot`, `v_owner_financial_pnl`, `v_public_available_catalog`) y funciones RPC atómicas (`fn_record_quality_inspection`, `fn_allocate_sale_item_to_lot`, `fn_execute_ownership_transfer`, `fn_create_owner_settlement`).
+8. [`0008_rls_policies_and_storage.sql`](./0008_rls_policies_and_storage.sql) — Activación y forzado de RLS en las 33 tablas públicas, políticas por rol y configuración de buckets en `storage` (`private-documents` y `public-catalog-media`).
+9. [`0009_seed_initial_eberto_baseline.sql`](./0009_seed_initial_eberto_baseline.sql) — Registro inicial único de `OWN-0001` (`Eberto`), acuerdo `AGR-0001` en estado `pending_configuration`, interruptores de APIs desactivados y las 7 incidencias reales auditadas del Excel.
+10. [`0010_verification_test_suite.sql`](./0010_verification_test_suite.sql) — Suite de pruebas de verificación envuelta en `BEGIN ... ROLLBACK`.
+11. [`0011_auth_triggers_anti_escalation_and_admin_rpc.sql`](./0011_auth_triggers_anti_escalation_and_admin_rpc.sql) — Trigger anti-autoasignación de roles (`trg_prevent_profile_self_escalation`), sincronización segura desde `auth.users` (`fn_handle_new_auth_user`), gestión administrativa de usuarios (`fn_admin_update_user_role_and_access`), registro de eventos de seguridad (`fn_log_security_event`) y autorización de documentos privados (`fn_authorize_private_document_access`).

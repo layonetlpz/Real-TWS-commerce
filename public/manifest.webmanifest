@@ -1,0 +1,20 @@
+{
+  "name": "REAL TWS",
+  "short_name": "REAL TWS",
+  "description": "REAL TWS Commerce & Multi-Owner Inventory System",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f141c",
+  "theme_color": "#0f141c",
+  "lang": "es-CO",
+  "icons": [
+    {
+      "src": "/icons/real-tws-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
