@@ -36,6 +36,7 @@ import {
 } from './brandMerchandisingService';
 import {
   getOrInitializeOwnerMarketingConsent,
+  readOwnerMarketingConsent,
   generateValidatedCopywritingBundle,
   renderCreativeStudioComposedSvg
 } from './creativeStudioService';
@@ -193,6 +194,7 @@ export interface DistributionValidationResult {
 
 export interface SocialMarketplaceStoreState {
   testSafeModeNoExternalPublish: boolean; // Garantiza no publicar en redes reales durante pruebas
+  lastQuotaResetDate?: string;
   connections: {
     facebook_graph_api: OfficialSocialConnectionConfig;
     instagram_graph_api: OfficialSocialConnectionConfig;
@@ -208,9 +210,23 @@ const SOCIAL_MARKETPLACE_STORAGE_KEY = 'rtw_social_marketplace_distribution_v1';
 // 1. INICIALIZACIÓN Y PERSISTENCIA DEL ESTADO
 // ============================================================================
 
+function getLocalTodayIsoDate(): string {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function resetSocialDailyQuotasIfNeeded(state: SocialMarketplaceStoreState): boolean {
+  const today = getLocalTodayIsoDate();
+  if (state.lastQuotaResetDate === today) return false;
+  state.connections.facebook_graph_api.dailyQuotaUsed = 0;
+  state.connections.instagram_graph_api.dailyQuotaUsed = 0;
+  state.lastQuotaResetDate = today;
+  return true;
+}
+
 function createInitialSocialMarketplaceState(): SocialMarketplaceStoreState {
   return {
     testSafeModeNoExternalPublish: true,
+    lastQuotaResetDate: getLocalTodayIsoDate(),
     connections: {
       facebook_graph_api: {
         platform: 'facebook_graph_api',
@@ -257,6 +273,9 @@ let inMemorySocialMarketplaceState: SocialMarketplaceStoreState | null = null;
 
 export function getSocialMarketplaceState(): SocialMarketplaceStoreState {
   if (inMemorySocialMarketplaceState) {
+    if (resetSocialDailyQuotasIfNeeded(inMemorySocialMarketplaceState)) {
+      saveSocialMarketplaceState(inMemorySocialMarketplaceState);
+    }
     return inMemorySocialMarketplaceState;
   }
   try {
@@ -265,6 +284,9 @@ export function getSocialMarketplaceState(): SocialMarketplaceStoreState {
       const parsed = JSON.parse(raw) as SocialMarketplaceStoreState;
       if (parsed && parsed.connections && Array.isArray(parsed.marketplaceListings)) {
         inMemorySocialMarketplaceState = parsed;
+        if (resetSocialDailyQuotasIfNeeded(parsed)) {
+          saveSocialMarketplaceState(parsed);
+        }
         return parsed;
       }
     }
@@ -392,10 +414,10 @@ export function validateDistributionCompliance(input: {
 
   const item = input.catalogItem;
   const ownerAlloc = item.ownerAllocations.find((a) => a.ownerId === input.ownerId);
-  const ownerName = ownerAlloc?.ownerName || 'Eberto';
+  const ownerName = ownerAlloc?.ownerName || input.ownerId;
 
-  // 1. Consentimiento Comercial del Propietario
-  const consent = getOrInitializeOwnerMarketingConsent(
+  // 1. Consentimiento Comercial del Propietario (lectura pura)
+  const consent = readOwnerMarketingConsent(
     input.ownerId,
     ownerName,
     item.sku,
@@ -1125,6 +1147,7 @@ export function publishApprovedPostToChannel(input: {
   }
 
   const nowIso = new Date().toISOString();
+  resetSocialDailyQuotasIfNeeded(state);
 
   // Canal Facebook Pages (Graph API oficial separada)
   if (pub.channel === 'facebook_page') {
@@ -1135,6 +1158,11 @@ export function publishApprovedPostToChannel(input: {
       saveSocialMarketplaceState(state);
       throw new Error(pub.errorDetail);
     }
+    if (!state.testSafeModeNoExternalPublish) {
+      pub.errorDetail = `BLOQUEO DE PRODUCCIÓN: La publicación automática vía Facebook Pages Graph API requiere una Edge Function de servidor autenticada con Vault (${fbConn.secretVaultKeyName}), no disponible desde el navegador. Active el Modo Seguro de Prueba para simular localmente o publique manualmente.`;
+      saveSocialMarketplaceState(state);
+      throw new Error(pub.errorDetail);
+    }
     if (fbConn.dailyQuotaUsed >= fbConn.dailyQuotaLimit) {
       pub.errorDetail = `Límite diario de publicaciones en Facebook Pages alcanzado (${fbConn.dailyQuotaLimit}/${fbConn.dailyQuotaLimit}).`;
       saveSocialMarketplaceState(state);
@@ -1142,30 +1170,30 @@ export function publishApprovedPostToChannel(input: {
     }
 
     fbConn.dailyQuotaUsed += 1;
-    const simulatedPostId = `${fbConn.externalAccountId}_${Date.now()}`;
+    const simulatedPostId = `${fbConn.externalAccountId}_SANDBOX_${Date.now()}`;
     const permalink = `https://www.facebook.com/${fbConn.externalAccountId}/posts/${Date.now()}`;
 
     pub.approvalStatus = 'published';
     pub.publishedAt = nowIso;
     pub.externalPostId = simulatedPostId;
     pub.publishedPermalinkUrl = permalink;
-    pub.isTestSimulation = state.testSafeModeNoExternalPublish;
+    pub.isTestSimulation = true;
     pub.apiResponsePayload = {
       provider: 'facebook_graph_api_v20',
       oauthVaultRef: fbConn.secretVaultKeyName,
-      testSafeSandbox: state.testSafeModeNoExternalPublish,
+      testSafeSandbox: true,
       id: simulatedPostId,
       permalink_url: permalink,
-      status: 'PUBLISHED_OK'
+      status: 'SANDBOX_SIMULATED_NO_EXTERNAL_TRAFFIC'
     };
     pub.errorDetail = null;
     pub.updatedAt = nowIso;
     pub.historyLog.unshift({
       timestamp: nowIso,
       actor: input.actorName,
-      action: 'PUBLISHED_FACEBOOK_GRAPH_API',
+      action: 'PUBLISHED_FACEBOOK_GRAPH_SANDBOX',
       statusAfter: 'published',
-      detail: `Publicado vía Facebook Pages Graph API (${state.testSafeModeNoExternalPublish ? 'Modo Seguro de Prueba sin tráfico externo' : 'Producción'}) • Post ID: ${simulatedPostId}`
+      detail: `Simulación Sandbox vía Facebook Pages Graph API (cero tráfico externo) • Ref: ${simulatedPostId}`
     });
 
     saveSocialMarketplaceState(state);
@@ -1181,6 +1209,11 @@ export function publishApprovedPostToChannel(input: {
       saveSocialMarketplaceState(state);
       throw new Error(pub.errorDetail);
     }
+    if (!state.testSafeModeNoExternalPublish) {
+      pub.errorDetail = `BLOQUEO DE PRODUCCIÓN: La publicación automática vía Instagram Content Publishing API requiere una Edge Function de servidor autenticada con Vault (${igConn.secretVaultKeyName}), no disponible desde el navegador. Active el Modo Seguro de Prueba para simular localmente o publique manualmente.`;
+      saveSocialMarketplaceState(state);
+      throw new Error(pub.errorDetail);
+    }
     if (igConn.dailyQuotaUsed >= igConn.dailyQuotaLimit) {
       pub.errorDetail = `Límite oficial de Instagram Content Publishing alcanzado (${igConn.dailyQuotaLimit}/24h).`;
       saveSocialMarketplaceState(state);
@@ -1188,8 +1221,8 @@ export function publishApprovedPostToChannel(input: {
     }
 
     igConn.dailyQuotaUsed += 1;
-    const containerId = `IG_CONT_${Date.now()}`;
-    const mediaId = `IG_MEDIA_${Date.now() + 1}`;
+    const containerId = `IG_CONT_SANDBOX_${Date.now()}`;
+    const mediaId = `IG_MEDIA_SANDBOX_${Date.now() + 1}`;
     const permalink = `https://www.instagram.com/p/RTWS${String(Date.now()).slice(-6)}/`;
 
     pub.approvalStatus = 'published';
@@ -1197,11 +1230,11 @@ export function publishApprovedPostToChannel(input: {
     pub.externalContainerId = containerId;
     pub.externalPostId = mediaId;
     pub.publishedPermalinkUrl = permalink;
-    pub.isTestSimulation = state.testSafeModeNoExternalPublish;
+    pub.isTestSimulation = true;
     pub.apiResponsePayload = {
       provider: 'instagram_graph_content_publishing',
       oauthVaultRef: igConn.secretVaultKeyName,
-      testSafeSandbox: state.testSafeModeNoExternalPublish,
+      testSafeSandbox: true,
       creation_container_id: containerId,
       published_media_id: mediaId,
       permalink
@@ -1211,9 +1244,9 @@ export function publishApprovedPostToChannel(input: {
     pub.historyLog.unshift({
       timestamp: nowIso,
       actor: input.actorName,
-      action: 'PUBLISHED_INSTAGRAM_CONTENT_API',
+      action: 'PUBLISHED_INSTAGRAM_CONTENT_SANDBOX',
       statusAfter: 'published',
-      detail: `Publicado vía Instagram Content Publishing (${state.testSafeModeNoExternalPublish ? 'Modo Seguro de Prueba' : 'Producción'}) • Container: ${containerId} • Media ID: ${mediaId}`
+      detail: `Simulación Sandbox vía Instagram Content Publishing (cero tráfico externo) • Container: ${containerId} • Media ID: ${mediaId}`
     });
 
     saveSocialMarketplaceState(state);
@@ -1377,7 +1410,8 @@ export function runSocialMarketplaceSafetyTests(): SocialDistributionTestSummary
         lotId: 'LOT-001',
         storageBin: 'B1',
         qtyAvailable: 0,
-        qtyPhysical: 0
+        qtyPhysical: 0,
+        qtyPendingInspection: 0
       }
     ]
   };

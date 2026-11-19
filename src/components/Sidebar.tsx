@@ -5,6 +5,7 @@ import { NAV_GROUPS, NAVIGATION_ITEMS } from '../lib/navigation';
 import { ROUTE_PERMISSIONS, ROLES_CATALOG } from '../lib/permissions';
 import { useAuth } from '../hooks/useAuth';
 import type { NavGroupId } from '../types/domain';
+import { RealTwsMonogram } from '../design-system/components/RealTwsBrandMark';
 import { LucideIcon } from './LucideIcon';
 
 interface SidebarProps {
@@ -42,6 +43,15 @@ export function Sidebar({
     }
   }, [currentNav]);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseMobile();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [mobileOpen, onCloseMobile]);
+
   const toggleGroup = (group: NavGroupId) => {
     setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }));
   };
@@ -67,14 +77,14 @@ export function Sidebar({
       <aside className={sidebarClasses} aria-label="Navegación Principal REAL TWS">
         <div className="rtw-brand-header">
           <NavLink to="/" className="rtw-brand-logo" onClick={onCloseMobile}>
-            <span className="rtw-brand-badge">RT</span>
+            <RealTwsMonogram size={36} />
             {!collapsed && (
               <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
-                <span style={{ color: '#f8fafc', fontWeight: 800, letterSpacing: '0.06em' }}>
+                <span style={{ color: '#f8fafc', fontWeight: 900, letterSpacing: '0.08em' }}>
                   REAL TWS
                 </span>
-                <span style={{ fontSize: '0.62rem', color: 'rgba(232, 199, 102, 0.8)', fontWeight: 600 }}>
-                  COMMERCE SYSTEM
+                <span style={{ fontSize: '0.58rem', color: 'rgba(232, 199, 102, 0.92)', fontWeight: 700, letterSpacing: '0.18em' }}>
+                  AURICULARES PREMIUM
                 </span>
               </span>
             )}
@@ -140,6 +150,7 @@ export function Sidebar({
                       end={item.path === '/'}
                       onClick={onCloseMobile}
                       title={collapsed ? `${group}: ${item.label}` : undefined}
+                      aria-label={collapsed ? `${group}: ${item.label}` : undefined}
                       className={({ isActive }) =>
                         `rtw-nav-link ${isActive ? 'active' : ''}`
                       }

@@ -28,9 +28,15 @@ import {
 } from './inventoryPurchaseService';
 import {
   getFinancialAccountingState,
+  computeSaleCommissionAndOwnerProfit,
   txRecordMultiOwnerDispatchedSale,
-  txRecordReturnOnDispatchedSale
+  txRecordReturnOnDispatchedSale,
+  txSyncDispatchedOrderPaymentCollection
 } from './financialAccountingService';
+import {
+  isValidPositiveInt,
+  isValidNonNegativeAmount
+} from '../utils/validations';
 
 export type AcquisitionSourceChannel =
   | 'whatsapp'
@@ -1015,14 +1021,14 @@ function buildValidatedOrderLines(
   }
 
   return linesInput.map((lineIn, idx) => {
-    if (lineIn.qtyOrdered <= 0) {
-      throw new Error(`La cantidad de la línea #${idx + 1} (${lineIn.sku}) debe ser mayor a 0.`);
+    if (!isValidPositiveInt(lineIn.qtyOrdered)) {
+      throw new Error(`La cantidad de la línea #${idx + 1} (${lineIn.sku}) debe ser un entero mayor a 0.`);
     }
-    if (lineIn.unitSalePriceCop < 0) {
-      throw new Error(`El precio unitario de ${lineIn.sku} no puede ser negativo.`);
+    if (!isValidNonNegativeAmount(lineIn.unitSalePriceCop)) {
+      throw new Error(`El precio unitario de ${lineIn.sku} debe ser un monto válido >= 0.`);
     }
     const grossLine = lineIn.qtyOrdered * lineIn.unitSalePriceCop;
-    if (lineIn.lineDiscountCop < 0 || lineIn.lineDiscountCop > grossLine) {
+    if (!isValidNonNegativeAmount(lineIn.lineDiscountCop) || lineIn.lineDiscountCop > grossLine) {
       throw new Error(`El descuento de la línea ${lineIn.sku} es inválido.`);
     }
 
@@ -1046,8 +1052,8 @@ function buildValidatedOrderLines(
 
     const builtAllocations: SalesOrderLineOwnerAllocation[] = lineIn.allocations.map(
       (allocIn, allocIdx) => {
-        if (allocIn.qtyAllocated <= 0) {
-          throw new Error(`La cantidad asignada al lote debe ser mayor a 0.`);
+        if (!isValidPositiveInt(allocIn.qtyAllocated)) {
+          throw new Error(`La cantidad asignada al lote debe ser un entero mayor a 0.`);
         }
         const lotAlloc = invState.allocations.find((a) => a.id === allocIn.lotAllocationId);
         if (!lotAlloc) {
@@ -1060,6 +1066,7 @@ function buildValidatedOrderLines(
         }
 
         const unitCostCop =
+          lotAlloc.effectiveUnitCostCop ??
           (lotAlloc.purchaseUnitCostCop ?? 0) + (lotAlloc.inboundShippingUnitCostCop ?? 0);
 
         const weight = allocIn.qtyAllocated / lineIn.qtyOrdered;
@@ -1130,6 +1137,13 @@ export function txCreateSalesOrder(
     throw new Error('Debe seleccionar un cliente registrado válido.');
   }
 
+  if (
+    !isValidNonNegativeAmount(input.shippingChargedCop ?? 0) ||
+    !isValidNonNegativeAmount(input.shippingRealCostCop ?? 0)
+  ) {
+    throw new Error('Los costos de envío cobrado y real deben ser montos válidos >= 0.');
+  }
+
   const builtLines = buildValidatedOrderLines(input.lines, invState);
   const nowIso = new Date().toISOString();
   const nextNum = state.orders.length + 1;
@@ -1184,6 +1198,7 @@ export function txCreateSalesOrder(
 export function txUpdateUnconfirmedSalesOrder(
   input: {
     salesOrderId: string;
+    salesChannel?: SalesOrderRecord['salesChannel'];
     shippingChargedCop: number;
     shippingRealCostCop: number;
     notes: string;
@@ -1207,6 +1222,14 @@ export function txUpdateUnconfirmedSalesOrder(
     );
   }
 
+  if (
+    !isValidNonNegativeAmount(input.shippingChargedCop) ||
+    !isValidNonNegativeAmount(input.shippingRealCostCop)
+  ) {
+    throw new Error('Los costos de envío cobrado y real deben ser montos válidos >= 0.');
+  }
+
+  const nextLines = buildValidatedOrderLines(input.lines, invState);
   const wasReserved = order.status === 'reserved';
 
   // Si tenía reservas activas, liberarlas antes de reescribir las líneas
@@ -1215,7 +1238,10 @@ export function txUpdateUnconfirmedSalesOrder(
     order.status = 'draft';
   }
 
-  order.lines = buildValidatedOrderLines(input.lines, invState);
+  if (input.salesChannel) {
+    order.salesChannel = input.salesChannel;
+  }
+  order.lines = nextLines;
   order.shippingChargedCop = Math.max(0, input.shippingChargedCop);
   order.shippingRealCostCop = Math.max(0, input.shippingRealCostCop);
   order.notes = input.notes.trim();
@@ -1397,10 +1423,10 @@ function recalculateOrderPaymentStatus(
       s + l.allocations.reduce((sa, a) => sa + a.returnAmountCop, 0),
     0
   );
-  const netOrderBilled = Math.max(
-    0,
-    grossSub - discSub - retSub + order.shippingChargedCop
-  );
+  const netOrderBilled =
+    order.status === 'cancelled'
+      ? 0
+      : Math.max(0, grossSub - discSub - retSub + order.shippingChargedCop);
 
   if (refundedSum > 0 && netCollected === 0) {
     order.paymentStatus = 'refunded';
@@ -1433,8 +1459,8 @@ export function txRegisterOrderPayment(
   if (order.status === 'cancelled' && input.status !== 'refunded') {
     throw new Error('No se pueden registrar cobros sobre un pedido cancelado.');
   }
-  if (input.amountCop <= 0) {
-    throw new Error('El monto del registro de pago debe ser mayor a $0 COP.');
+  if (!isValidNonNegativeAmount(input.amountCop) || input.amountCop <= 0) {
+    throw new Error('El monto del registro de pago debe ser un valor válido mayor a $0 COP.');
   }
 
   const nowIso = new Date().toISOString();
@@ -1460,6 +1486,30 @@ export function txRegisterOrderPayment(
 
   if (!customState) {
     saveSalesOrdersCrmState(state);
+    if (
+      order.status === 'dispatched' ||
+      order.status === 'delivered' ||
+      order.status === 'partially_returned'
+    ) {
+      try {
+        const prof = calculateOrderProfitability(order.id, state);
+        const collectedRatioPct =
+          prof.netOrderTotalBilledCop > 0
+            ? Math.min(
+                100,
+                Math.round(
+                  (prof.netCollectedCashCop / prof.netOrderTotalBilledCop) * 100
+                )
+              )
+            : 100;
+        txSyncDispatchedOrderPaymentCollection({
+          orderNumber: order.orderNumber,
+          collectedRatioPct
+        });
+      } catch {
+        // Non-blocking sync
+      }
+    }
   }
   return payment;
 }
@@ -1565,6 +1615,68 @@ export function txDispatchSalesOrder(
     throw new Error(`Pedido ${input.salesOrderId} no encontrado.`);
   }
 
+  if (
+    order.status !== 'draft' &&
+    order.status !== 'reserved' &&
+    order.status !== 'confirmed' &&
+    order.status !== 'preparing'
+  ) {
+    throw new Error(
+      `El pedido ${order.orderNumber} no puede despacharse desde el estado '${order.status}'.`
+    );
+  }
+
+  if (!input.carrierName.trim()) {
+    throw new Error('Debe indicar la transportadora o modalidad de entrega.');
+  }
+  if (!input.trackingNumber.trim()) {
+    throw new Error('Debe ingresar el número de guía o comprobante de despacho.');
+  }
+  if (!isValidNonNegativeAmount(input.shippingRealCostCop)) {
+    throw new Error('El costo real de envío debe ser un monto válido >= 0.');
+  }
+
+  // Fase 1 de validación atómica previa a cualquier mutación:
+  // Verificar existencia de lotes, ausencia de PENDING_COST y stock suficiente acumulado en TODAS las líneas.
+  const totalRequestedByLot = new Map<string, number>();
+  const unreservedRequestedByLot = new Map<string, number>();
+  for (const line of order.lines) {
+    for (const alloc of line.allocations) {
+      const lotAlloc = invState.allocations.find((a) => a.id === alloc.lotAllocationId);
+      if (!lotAlloc) {
+        throw new Error(`Asignación de lote ${alloc.lotAllocationId} no encontrada.`);
+      }
+      if (
+        lotAlloc.costStatus === 'PENDING_COST' ||
+        lotAlloc.effectiveUnitCostCop === null ||
+        lotAlloc.purchaseUnitCostCop === null
+      ) {
+        throw new Error(
+          `COSTO PENDIENTE BLOQUEADO: El lote ${lotAlloc.lotId} (${lotAlloc.sku}) tiene estado PENDING_COST. Registre el costo real en Finanzas antes de despachar.`
+        );
+      }
+
+      const nextTotal = (totalRequestedByLot.get(lotAlloc.id) ?? 0) + alloc.qtyAllocated;
+      totalRequestedByLot.set(lotAlloc.id, nextTotal);
+      if (lotAlloc.qtyGood < nextTotal) {
+        throw new Error(
+          `Stock apto insuficiente en lote ${lotAlloc.lotId} para despachar ${nextTotal} ud(s) de ${alloc.sku} (disponible apto: ${lotAlloc.qtyGood}).`
+        );
+      }
+
+      if (!alloc.reservationId) {
+        const nextUnres =
+          (unreservedRequestedByLot.get(lotAlloc.id) ?? 0) + alloc.qtyAllocated;
+        unreservedRequestedByLot.set(lotAlloc.id, nextUnres);
+        if (lotAlloc.qtyAvailable < nextUnres) {
+          throw new Error(
+            `Stock disponible sin reserva insuficiente en lote ${lotAlloc.lotId} para despachar ${nextUnres} ud(s) de ${alloc.sku} (disponible: ${lotAlloc.qtyAvailable}).`
+          );
+        }
+      }
+    }
+  }
+
   if (order.status === 'draft' || order.status === 'reserved') {
     txConfirmSalesOrder(order.id, input.actorName, state, invState);
   }
@@ -1586,42 +1698,28 @@ export function txDispatchSalesOrder(
     throw new Error(`El pedido ${order.orderNumber} no puede despacharse desde el estado '${order.status}'.`);
   }
 
-  if (!input.carrierName.trim()) {
-    throw new Error('Debe indicar la transportadora o modalidad de entrega.');
-  }
-  if (!input.trackingNumber.trim()) {
-    throw new Error('Debe ingresar el número de guía o comprobante de despacho.');
-  }
-
   const nowIso = new Date().toISOString();
 
   // Descontar salidas físicas reales y consumir las reservas de cada asignación
   for (const line of order.lines) {
     for (const alloc of line.allocations) {
-      const lotAlloc = invState.allocations.find((a) => a.id === alloc.lotAllocationId);
-      if (!lotAlloc) {
-        throw new Error(`Asignación de lote ${alloc.lotAllocationId} no encontrada.`);
-      }
+      const lotAlloc = invState.allocations.find((a) => a.id === alloc.lotAllocationId)!;
 
-      if (lotAlloc.qtyGood < alloc.qtyAllocated) {
-        throw new Error(
-          `Stock apto insuficiente en lote ${lotAlloc.lotId} para despachar ${alloc.qtyAllocated} ud(s) de ${alloc.sku}.`
-        );
-      }
+      // Actualizar snapshot de costo efectivo real antes de despachar y asentar en Finanzas
+      alloc.unitCostCop = lotAlloc.effectiveUnitCostCop!;
 
       lotAlloc.qtyPhysical -= alloc.qtyAllocated;
       lotAlloc.qtyGood -= alloc.qtyAllocated;
-      lotAlloc.qtyReserved = Math.max(0, lotAlloc.qtyReserved - alloc.qtyAllocated);
-      lotAlloc.qtyAvailable = Math.max(0, lotAlloc.qtyGood - lotAlloc.qtyReserved);
-      lotAlloc.lockVersion += 1;
-
       if (alloc.reservationId) {
         const resRec = invState.reservations.find((r) => r.id === alloc.reservationId);
-        if (resRec) {
+        if (resRec && resRec.status === 'active') {
+          lotAlloc.qtyReserved = Math.max(0, lotAlloc.qtyReserved - alloc.qtyAllocated);
           resRec.qtyFulfilled = resRec.qtyReserved;
           resRec.status = 'fulfilled';
         }
       }
+      lotAlloc.qtyAvailable = Math.max(0, lotAlloc.qtyGood - lotAlloc.qtyReserved);
+      lotAlloc.lockVersion += 1;
 
       const dispatchMov: ImmutableStockMovement = Object.freeze({
         id: `MOV-DSP-${Date.now()}-${invState.movements.length + 1}`,
@@ -1639,7 +1737,7 @@ export function txDispatchSalesOrder(
         deltaGood: -alloc.qtyAllocated,
         deltaDefective: 0,
         deltaPending: 0,
-        deltaReserved: -alloc.qtyAllocated,
+        deltaReserved: alloc.reservationId ? -alloc.qtyAllocated : 0,
         balancePhysicalAfter: lotAlloc.qtyPhysical,
         balanceGoodAfter: lotAlloc.qtyGood,
         balanceDefectiveAfter: lotAlloc.qtyDefective,
@@ -2004,7 +2102,9 @@ export function txReturnSalesOrderAllocation(
     movementType:
       input.itemCondition === 'good_restock'
         ? 'customer_return_restock'
-        : 'customer_return_defective',
+        : input.itemCondition === 'defective_warranty'
+          ? 'customer_return_defective'
+          : 'reconciliation_adjustment',
     deltaPhysical: input.qtyToReturn,
     deltaGood,
     deltaDefective,
@@ -2077,6 +2177,7 @@ export function txReturnSalesOrderAllocation(
       const matchingFinAlloc = finState.salesAllocations.find(
         (sa) =>
           sa.orderNumber === order.orderNumber &&
+          sa.sku === targetAlloc!.sku &&
           sa.lotAllocationId === targetAlloc!.lotAllocationId
       );
       if (matchingFinAlloc) {
@@ -2134,22 +2235,20 @@ export function calculateOrderProfitability(
 
       const existing = ownerMap.get(alloc.ownerId);
       const agreement = finState.agreements[alloc.ownerId];
-      const isConfigured =
-        agreement &&
-        agreement.status === 'active' &&
-        agreement.storeCommissionPct !== null;
-      const commPct = isConfigured ? agreement.storeCommissionPct! : null;
+      const commPct =
+        agreement && agreement.status === 'active'
+          ? agreement.distributionModel === 'attributable_profit'
+            ? 0
+            : agreement.storeCommissionPct
+          : null;
 
       if (!existing) {
         const grossProfitBeforeComm = netRev - cogs;
-        const commCop =
-          commPct !== null && grossProfitBeforeComm > 0
-            ? Math.round(( netRev * commPct ) / 100)
-            : commPct === 0
-              ? 0
-              : null;
-        const attrProfit =
-          commCop !== null ? grossProfitBeforeComm - commCop : grossProfitBeforeComm;
+        const commCalc = computeSaleCommissionAndOwnerProfit(
+          netRev,
+          grossProfitBeforeComm,
+          agreement
+        );
 
         ownerMap.set(alloc.ownerId, {
           ownerId: alloc.ownerId,
@@ -2165,9 +2264,12 @@ export function calculateOrderProfitability(
           cogsTotalCop: cogs,
           grossProfitBeforeCommissionCop: grossProfitBeforeComm,
           storeCommissionPct: commPct,
-          storeCommissionCop: commCop,
-          attributableOwnerProfitCop: attrProfit,
-          agreementStatusLabel: isConfigured ? 'ACTIVO' : 'PENDIENTE DE CONFIGURAR'
+          storeCommissionCop: commCalc.storeCommissionCop,
+          attributableOwnerProfitCop: commCalc.attributableOwnerProfitCop,
+          agreementStatusLabel:
+            commCalc.commissionStatus === 'CALCULATED_BY_AGREEMENT'
+              ? 'ACTIVO'
+              : 'PENDIENTE DE CONFIGURAR'
         });
       } else {
         if (!existing.lotsUsed.includes(alloc.lotId)) {
@@ -2184,17 +2286,18 @@ export function calculateOrderProfitability(
         existing.grossProfitBeforeCommissionCop =
           existing.netRevenueCop - existing.cogsTotalCop;
 
-        if (existing.storeCommissionPct !== null) {
-          existing.storeCommissionCop =
-            existing.grossProfitBeforeCommissionCop > 0
-              ? Math.round((existing.netRevenueCop * existing.storeCommissionPct) / 100)
-              : 0;
-          existing.attributableOwnerProfitCop =
-            existing.grossProfitBeforeCommissionCop - existing.storeCommissionCop;
-        } else {
-          existing.storeCommissionCop = null;
-          existing.attributableOwnerProfitCop = existing.grossProfitBeforeCommissionCop;
-        }
+        const commCalc = computeSaleCommissionAndOwnerProfit(
+          existing.netRevenueCop,
+          existing.grossProfitBeforeCommissionCop,
+          agreement
+        );
+        existing.storeCommissionPct = commPct;
+        existing.storeCommissionCop = commCalc.storeCommissionCop;
+        existing.attributableOwnerProfitCop = commCalc.attributableOwnerProfitCop;
+        existing.agreementStatusLabel =
+          commCalc.commissionStatus === 'CALCULATED_BY_AGREEMENT'
+            ? 'ACTIVO'
+            : 'PENDIENTE DE CONFIGURAR';
       }
     }
   }

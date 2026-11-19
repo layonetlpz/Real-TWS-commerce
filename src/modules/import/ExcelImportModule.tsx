@@ -24,8 +24,10 @@ import {
   downloadOfficialCsvTemplate,
   exportIncidencesReportToCsv,
   getCurrentImportState,
+  syncOwnersIntoImportStore,
   runImportEngineTestSuite
 } from '../../services/excelImportEngine';
+import { fetchLiveOwnersFromSupabase } from '../../services/supabaseDataBridge';
 import { parseXlsxBuffer, parseCsvUtf8Text } from '../../utils/spreadsheetParser';
 import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
@@ -42,9 +44,11 @@ type EngineTabId =
   | 'STEP_6_HISTORY_TESTS';
 
 export function ExcelImportModule() {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { notify } = useNotifications();
-  const actorEmail = userProfile?.email || 'admin@realtws.co';
+  const actorEmail = userProfile?.email || 'sistema@realtws.co';
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canConfirmImportRole = effectiveRole === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<EngineTabId>('STEP_1_UPLOAD_SHEETS');
   const [analysis, setAnalysis] = useState<ImportPreviewAnalysis | null>(null);
@@ -54,16 +58,36 @@ export function ExcelImportModule() {
   const [hasReviewedPreview, setHasReviewedPreview] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [testResults, setTestResults] = useState<ImportTestCaseResult[]>([]);
   const [persistedState, setPersistedState] = useState(() => getCurrentImportState());
 
   useEffect(() => {
+    let active = true;
     const syncHandler = () => {
-      setPersistedState(getCurrentImportState());
+      if (active) setPersistedState(getCurrentImportState());
     };
     window.addEventListener('rtw-import-state-updated', syncHandler);
-    return () => window.removeEventListener('rtw-import-state-updated', syncHandler);
+
+    fetchLiveOwnersFromSupabase()
+      .then((res) => {
+        if (!active || res.error || res.data.length === 0) return;
+        const nextState = syncOwnersIntoImportStore(
+          res.data.map((o) => ({
+            id: o.id,
+            fullName: o.full_name,
+            status: o.status === 'inactive' ? 'inactive' : 'active'
+          }))
+        );
+        if (active) setPersistedState(nextState);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      window.removeEventListener('rtw-import-state-updated', syncHandler);
+    };
   }, []);
 
   const handleDownloadTemplate = () => {
@@ -95,7 +119,8 @@ export function ExcelImportModule() {
       const result = analyzeWorkbookForImport(wb);
       setAnalysis(result);
       setSelectedSheetForHeaders(wb.sheetNames[0] || '');
-      setHasReviewedPreview(true);
+      // Obligar pasar por Pestaña 3 (Vista Previa) tras cargar un archivo nuevo
+      setHasReviewedPreview(activeTab === 'STEP_3_PREVIEW');
 
       notify(
         result.errors.length === 0 ? 'success' : 'warning',
@@ -115,28 +140,40 @@ export function ExcelImportModule() {
   };
 
   const handleConfirmTransactionalImport = async () => {
-    if (!analysis) return;
+    if (!canConfirmImportRole) {
+      notify('error', 'Permiso denegado', `Solo ADMIN puede confirmar lotes de importación (rol: ${effectiveRole}).`);
+      return;
+    }
+    if (!analysis || isCommitting) return;
+    setIsCommitting(true);
     setIsConfirmModalOpen(false);
-    const outcome = await commitImportBatch(analysis, actorEmail);
-    const updatedState = getCurrentImportState();
-    setPersistedState(updatedState);
-    // Re-analyze against updated state so duplicate/idempotency lock reflects immediately
-    setAnalysis(analyzeWorkbookForImport(analysis.workbook, updatedState));
+    try {
+      const outcome = await commitImportBatch(analysis, actorEmail);
+      const updatedState = getCurrentImportState();
+      setPersistedState(updatedState);
+      // Re-analyze against updated state so duplicate/idempotency lock reflects immediately
+      setAnalysis(analyzeWorkbookForImport(analysis.workbook, updatedState));
 
-    if (outcome.success) {
-      setActiveTab('STEP_5_SUMMARY_MOVEMENTS');
-      notify(
-        'success',
-        `Lote ${outcome.batchRecord.batchCode} importado atómicamente`,
-        `Se crearon ${outcome.batchRecord.totalOpeningUnits} unidades en movimientos inmutables OPENING_BALANCE para OWN-0001 (Eberto).`
-      );
-    } else {
-      setActiveTab('STEP_4_VALIDATIONS_DUPLICATES');
-      notify(
-        'error',
-        'Importación revertida (ROLLBACK)',
-        outcome.errorMessage || 'Se detectaron errores bloqueantes.'
-      );
+      if (outcome.success) {
+        const distinctOwners = Array.from(
+          new Set(analysis.rows.map((r) => r.ownerId).filter(Boolean))
+        ).join(', ');
+        setActiveTab('STEP_5_SUMMARY_MOVEMENTS');
+        notify(
+          'success',
+          `Lote ${outcome.batchRecord.batchCode} importado atómicamente`,
+          `Se registraron ${outcome.batchRecord.totalOpeningUnits} unidades en movimientos inmutables OPENING_BALANCE (${distinctOwners || 'sin propietario'}).`
+        );
+      } else {
+        setActiveTab('STEP_4_VALIDATIONS_DUPLICATES');
+        notify(
+          'error',
+          'Importación revertida (ROLLBACK)',
+          outcome.errorMessage || 'Se detectaron errores bloqueantes.'
+        );
+      }
+    } finally {
+      setIsCommitting(false);
     }
   };
 
@@ -287,12 +324,12 @@ export function ExcelImportModule() {
                 Archivo activo: {analysis.workbook.filename}
               </span>
               <span className="rtw-badge rtw-badge-gold">{analysis.workbook.format}</span>
-              <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+              <span style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>
                 Lote: <strong>{analysis.batchCodePreview}</strong> · Idempotency Key:{' '}
                 <code>{analysis.idempotencyKey}</code>
               </span>
             </div>
-            <div style={{ fontSize: '0.8rem', color: '#334155' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)' }}>
               <strong>{analysis.workbook.sheetNames.length}</strong> hojas detectadas ·{' '}
               <strong>{analysis.rows.length}</strong> productos/variantes ·{' '}
               <strong style={{ color: analysis.errors.length > 0 ? '#b91c1c' : '#166534' }}>
@@ -308,9 +345,9 @@ export function ExcelImportModule() {
               type="button"
               onClick={() => exportIncidencesReportToCsv(analysis)}
               style={{
-                background: '#f8fafc',
-                color: '#1e293b',
-                border: '1px solid #cbd5e1',
+                background: 'var(--rtw-bg-subtle)',
+                color: 'var(--rtw-text-primary)',
+                border: '1px solid var(--rtw-border-light)',
                 borderRadius: '6px',
                 padding: '8px 12px',
                 fontSize: '0.79rem',
@@ -327,11 +364,13 @@ export function ExcelImportModule() {
 
             <button
               type="button"
-              disabled={!analysis.canConfirmImport || !hasReviewedPreview}
+              disabled={!canConfirmImportRole || !analysis.canConfirmImport || !hasReviewedPreview || isCommitting}
               onClick={() => setIsConfirmModalOpen(true)}
               style={{
                 background:
-                  analysis.canConfirmImport && hasReviewedPreview ? '#166534' : '#94a3b8',
+                  canConfirmImportRole && analysis.canConfirmImport && hasReviewedPreview && !isCommitting
+                    ? '#166534'
+                    : '#94a3b8',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '6px',
@@ -339,14 +378,22 @@ export function ExcelImportModule() {
                 fontSize: '0.8rem',
                 fontWeight: 800,
                 cursor:
-                  analysis.canConfirmImport && hasReviewedPreview ? 'pointer' : 'not-allowed',
+                  canConfirmImportRole && analysis.canConfirmImport && hasReviewedPreview && !isCommitting
+                    ? 'pointer'
+                    : 'not-allowed',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px'
               }}
             >
               <CheckCircle2 size={15} />
-              9–10. Confirmar e Importar Lote Transaccional
+              {isCommitting
+                ? 'Confirmando lote...'
+                : !canConfirmImportRole
+                  ? 'Solo ADMIN puede confirmar'
+                  : !hasReviewedPreview
+                    ? 'Revise Pestaña 3 (Vista previa) primero'
+                    : '9–10. Confirmar e Importar Lote Transaccional'}
             </button>
           </div>
         </section>
@@ -356,7 +403,7 @@ export function ExcelImportModule() {
           PESTAÑA 1: SUBIR ARCHIVO, DETECTAR HOJAS Y DETECTAR ENCABEZADOS
          ===================================================================== */}
       {activeTab === 'STEP_1_UPLOAD_SHEETS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '16px' }}>
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
               Funciones 1 y 2: Subida de Archivo y Detección de Hojas
@@ -365,17 +412,17 @@ export function ExcelImportModule() {
               <div
                 style={{
                   padding: '24px',
-                  border: '2px dashed #cbd5e1',
+                  border: '2px dashed var(--rtw-border-light)',
                   borderRadius: '10px',
                   textAlign: 'center',
-                  background: '#f8fafc'
+                  background: 'var(--rtw-bg-subtle)'
                 }}
               >
                 <FileSpreadsheet size={34} color="#d4af37" style={{ margin: '0 auto 10px' }} />
                 <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '6px' }}>
                   Ningún archivo cargado en la sesión actual
                 </p>
-                <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '14px' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)', marginBottom: '14px' }}>
                   Sube un archivo Excel (<code>.xlsx</code>) o <code>.csv</code> UTF-8 con tu inventario multipropietario para previsualizar el mapeo de columnas y validar inconsistencias antes de importar.
                 </p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -444,7 +491,7 @@ export function ExcelImportModule() {
               {activeSheetInfo ? `— ${activeSheetInfo.name} (Fila ${activeSheetInfo.headerRowNumber})` : ''}
             </h3>
             {!activeSheetInfo ? (
-              <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
                 Cargue un archivo y seleccione una hoja a la izquierda para inspeccionar sus encabezados detectados.
               </p>
             ) : (
@@ -467,7 +514,7 @@ export function ExcelImportModule() {
                             <span className="rtw-badge rtw-badge-gold">Col {colLetter}</span>
                           </td>
                           <td style={{ fontWeight: 700 }}>{headerText}</td>
-                          <td style={{ color: '#475569' }}>{sampleRow[colLetter] || '—'}</td>
+                          <td style={{ color: 'var(--rtw-text-secondary)' }}>{sampleRow[colLetter] || '—'}</td>
                         </tr>
                       );
                     })}
@@ -488,13 +535,13 @@ export function ExcelImportModule() {
             <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
               Función 4: Mapeo Oficial de Campos hacia los 10 Dominios de Supabase
             </h3>
-            <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
               Mapeo auditado entre las hojas del Excel multipropietario (o CSV UTF-8) y las tablas relacionales de PostgreSQL.
             </p>
           </div>
 
           {!analysis ? (
-            <p style={{ fontSize: '0.84rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)' }}>
               Cargue primero el archivo en la Pestaña 1 para visualizar el mapeo de campos.
             </p>
           ) : (
@@ -523,7 +570,7 @@ export function ExcelImportModule() {
                       <td>
                         <code>{m.targetFields}</code>
                       </td>
-                      <td style={{ color: '#334155', maxWidth: '300px' }}>{m.ruleApplied}</td>
+                      <td style={{ color: 'var(--rtw-text-secondary)', maxWidth: '300px' }}>{m.ruleApplied}</td>
                       <td style={{ fontWeight: 800 }}>{m.recordsDetected}</td>
                     </tr>
                   ))}
@@ -553,7 +600,7 @@ export function ExcelImportModule() {
               <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
                 Función 5: Vista Previa Obligatoria Antes de Importar
               </h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 Inspeccione las cantidades físicas (apto, defectuoso, pendiente), el propietario, el lote y el estado del costo de cada fila antes de confirmar.
               </p>
             </div>
@@ -567,7 +614,7 @@ export function ExcelImportModule() {
                 style={{
                   padding: '7px 12px',
                   borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid var(--rtw-border-light)',
                   fontSize: '0.8rem',
                   minWidth: '240px'
                 }}
@@ -582,7 +629,7 @@ export function ExcelImportModule() {
                 style={{
                   padding: '7px 10px',
                   borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid var(--rtw-border-light)',
                   fontSize: '0.8rem'
                 }}
               >
@@ -606,7 +653,7 @@ export function ExcelImportModule() {
           </div>
 
           {!analysis ? (
-            <p style={{ fontSize: '0.84rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)' }}>
               Cargue un archivo para previsualizar los registros.
             </p>
           ) : (
@@ -637,7 +684,7 @@ export function ExcelImportModule() {
                       </td>
                       <td>
                         <div style={{ fontWeight: 700 }}>{r.productName}</div>
-                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--rtw-text-muted)' }}>
                           {r.category} · Color: {r.color}
                         </div>
                       </td>
@@ -669,10 +716,10 @@ export function ExcelImportModule() {
                             fontWeight: 800,
                             background:
                               r.costStatus === 'PENDING_COST'
-                                ? '#fef3c7'
+                                ? 'var(--rtw-warning-bg)'
                                 : r.costStatus === 'BONUS_ZERO_COST'
-                                  ? '#e0f2fe'
-                                  : '#dcfce7',
+                                  ? 'var(--rtw-info-bg)'
+                                  : 'var(--rtw-success-bg)',
                             color:
                               r.costStatus === 'PENDING_COST'
                                 ? '#92400e'
@@ -686,7 +733,7 @@ export function ExcelImportModule() {
                       </td>
                       <td style={{ maxWidth: '250px', fontSize: '0.73rem' }}>
                         <strong>{r.rowOutcome}</strong>
-                        <div style={{ color: '#64748b' }}>{r.justification}</div>
+                        <div style={{ color: 'var(--rtw-text-muted)' }}>{r.justification}</div>
                       </td>
                     </tr>
                   ))}
@@ -704,7 +751,7 @@ export function ExcelImportModule() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {!analysis ? (
             <section className="rtw-card">
-              <p style={{ fontSize: '0.84rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)' }}>
                 Cargue un archivo para ejecutar las validaciones de propietario, cantidades, costos y duplicados.
               </p>
             </section>
@@ -723,7 +770,7 @@ export function ExcelImportModule() {
                     style={{
                       padding: '12px 14px',
                       borderRadius: '8px',
-                      background: '#f0fdf4',
+                      background: 'var(--rtw-success-bg)',
                       border: '1px solid #bbf7d0',
                       color: '#166534',
                       fontSize: '0.82rem',
@@ -747,7 +794,7 @@ export function ExcelImportModule() {
                     </thead>
                     <tbody>
                       {analysis.errors.map((err) => (
-                        <tr key={err.id} style={{ background: '#fef2f2' }}>
+                        <tr key={err.id} style={{ background: 'var(--rtw-danger-bg)' }}>
                           <td style={{ fontWeight: 800, color: '#b91c1c' }}>{err.code}</td>
                           <td>{err.rowNumber}</td>
                           <td>
@@ -835,7 +882,7 @@ export function ExcelImportModule() {
                         </td>
                         <td>
                           <div>{item.message}</div>
-                          <div style={{ fontSize: '0.73rem', color: '#64748b' }}>
+                          <div style={{ fontSize: '0.73rem', color: 'var(--rtw-text-muted)' }}>
                             {item.remediation}
                           </div>
                         </td>
@@ -869,7 +916,7 @@ export function ExcelImportModule() {
                 <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
                   Resumen Comparativo Antes vs. Después de la Importación
                 </h3>
-                <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                   Comparativa auditada de totales de productos, variantes, unidades físicas, costos, propietarios, errores, advertencias y descartados.
                 </p>
               </div>
@@ -889,33 +936,59 @@ export function ExcelImportModule() {
 
               if (!before || !after) {
                 return (
-                  <p style={{ fontSize: '0.84rem', color: '#64748b' }}>
+                  <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)' }}>
                     Cargue un archivo en la Pestaña 1 para visualizar el resumen comparativo Antes vs. Después.
                   </p>
                 );
               }
 
+              const ownerIdsInFile = analysis
+                ? Array.from(new Set(analysis.rows.map((r) => r.ownerId).filter(Boolean))).join(', ')
+                : persistedState.registeredOwners.map((o) => o.id).join(', ');
+              const openingRowsCount = analysis
+                ? analysis.rows.filter(
+                    (r) => r.rowOutcome === 'IMPORTED_WITH_OPENING_BALANCE' && r.qtyPhysical > 0
+                  ).length
+                : after.totalOpeningLots;
+              const zeroStockCount = analysis
+                ? analysis.rows.filter((r) => r.qtyPhysical === 0).length
+                : 0;
+              const pendingSkusList = analysis
+                ? analysis.rows
+                    .filter((r) => r.costStatus === 'PENDING_COST')
+                    .map((r) => `${r.sku} (${r.qtyPhysical} u.)`)
+                    .slice(0, 4)
+                    .join(', ')
+                : '';
+              const bonusSkusList = analysis
+                ? analysis.rows
+                    .filter((r) => r.costStatus === 'BONUS_ZERO_COST')
+                    .map((r) => r.sku)
+                    .slice(0, 4)
+                    .join(', ')
+                : '';
+
               const metricRows = [
                 {
-                  label: 'Propietarios Activos Validados (OWN-0001 Eberto)',
+                  label: 'Propietarios Activos Validados (public.owners)',
                   before: before.totalOwners,
                   after: after.totalOwners,
-                  note: 'Eberto (OWN-0001). Prohibido auto-asignar a futuras recepciones.'
+                  note: `Propietarios en lote: ${ownerIdsInFile || '—'}. Prohibido auto-asignar propietario por defecto.`
                 },
                 {
                   label: 'Total Productos Maestros (public.products)',
                   before: before.totalProducts,
                   after: after.totalProducts,
-                  note: 'Catálogo maestro universal (incluye 37 con stock > 0 y 3 con stock 0).'
+                  note: `Catálogo universal (${openingRowsCount} con stock > 0 y ${zeroStockCount} con stock 0 en este lote).`
                 },
                 {
                   label: 'Total Variantes Comerciales SKU (public.product_variants)',
                   before: before.totalVariantsSku,
                   after: after.totalVariantsSku,
-                  note: '40 SKUs únicos sin duplicados.'
+                  note: `${after.totalVariantsSku} SKUs únicos proyectados en catálogo.`
                 },
                 {
-                  label: 'Lotes de Apertura con Stock Físico > 0 (LOT-INI-2026-01)',
+                  label: 'Lotes de Apertura con Stock Físico > 0',
                   before: before.totalOpeningLots,
                   after: after.totalOpeningLots,
                   note: 'Sin crear recepciones ni órdenes de compra ficticias.'
@@ -930,13 +1003,13 @@ export function ExcelImportModule() {
                   label: 'Total Unidades Físicas en Bodega (qty_physical)',
                   before: before.totalPhysicalUnits,
                   after: after.totalPhysicalUnits,
-                  note: '36 SKUs con 1 unidad + MOT-ACC-003-NEG con 2 unidades = 38 unidades.'
+                  note: `Incremento neto en el lote: +${after.totalPhysicalUnits - before.totalPhysicalUnits} unidad(es) físicas.`
                 },
                 {
                   label: 'Unidades Aptas (qty_good) / Defectuosas (qty_defective)',
                   before: `${before.totalGoodUnits} / ${before.totalDefectiveUnits}`,
                   after: `${after.totalGoodUnits} / ${after.totalDefectiveUnits}`,
-                  note: 'Pendientes de inspección técnica inicial.'
+                  note: 'Según desglose físico validado en origen.'
                 },
                 {
                   label: 'Unidades Pendientes de Revisión (qty_pending_inspection)',
@@ -948,19 +1021,19 @@ export function ExcelImportModule() {
                   label: 'Costo Total de Inventario Físico Activo (COP)',
                   before: formatCOP(before.totalActiveStockCostCop),
                   after: formatCOP(after.totalActiveStockCostCop),
-                  note: `Costo registrado total incluyendo 2 históricos vendidos: ${formatCOP(after.totalRegisteredCatalogCostCop)}.`
+                  note: `Costo registrado total del catálogo (incl. histórico vendido): ${formatCOP(after.totalRegisteredCatalogCostCop)}.`
                 },
                 {
                   label: 'SKUs con Costo PENDING_COST (Sin inferir ni inventar)',
                   before: before.pendingCostSkus,
                   after: after.pendingCostSkus,
-                  note: 'ELE-AUD-001-STD (1 unid.) y AUD-TWS-003-NEG (0 unid.).'
+                  note: pendingSkusList || 'Ninguno pendiente en el lote actual.'
                 },
                 {
                   label: 'SKUs con Costo $0 COP Documentado (BONUS_ZERO_COST)',
                   before: before.bonusZeroCostSkus,
                   after: after.bonusZeroCostSkus,
-                  note: 'HER-SOP-002-NEG (Regalo por compra).'
+                  note: bonusSkusList || 'Ninguno bonificado en el lote actual.'
                 },
                 {
                   label: 'Historial de Precios Comerciales (public.price_history)',
@@ -990,7 +1063,7 @@ export function ExcelImportModule() {
                           <ArrowRight size={14} color="#d4af37" />
                         </td>
                         <td style={{ fontWeight: 800, color: '#166534' }}>{m.after}</td>
-                        <td style={{ color: '#475569', fontSize: '0.76rem' }}>{m.note}</td>
+                        <td style={{ color: 'var(--rtw-text-secondary)', fontSize: '0.76rem' }}>{m.note}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1009,7 +1082,7 @@ export function ExcelImportModule() {
               </h3>
             </div>
             {persistedState.openingMovements.length === 0 ? (
-              <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
                 Aún no se ha confirmado la importación transaccional en esta sesión. Haga clic en "Confirmar e Importar Lote Transaccional" arriba.
               </p>
             ) : (
@@ -1098,7 +1171,7 @@ export function ExcelImportModule() {
                 <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
                   Batería de 6 Pruebas Obligatorias del Motor de Importación (En Memoria sobre Copia Temporal)
                 </h3>
-                <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                   Verifica archivo válido, archivo duplicado, archivo incompleto, propietario inexistente, error de cantidades y cero duplicación final sin tocar el Excel original.
                 </p>
               </div>
@@ -1126,11 +1199,11 @@ export function ExcelImportModule() {
             </div>
 
             {testResults.length === 0 ? (
-              <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
                 Haga clic en "Ejecutar las 6 Pruebas Obligatorias" para correr la suite de verificación sobre una copia temporal aislada.
               </p>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '12px' }}>
                 {testResults.map((tr) => (
                   <div
                     key={tr.testId}
@@ -1138,11 +1211,11 @@ export function ExcelImportModule() {
                       padding: '12px 14px',
                       borderRadius: '8px',
                       border: tr.passed ? '1px solid #86efac' : '1px solid #fca5a5',
-                      background: tr.passed ? '#f0fdf4' : '#fef2f2'
+                      background: tr.passed ? 'var(--rtw-success-bg)' : 'var(--rtw-danger-bg)'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>
+                      <span style={{ fontWeight: 800, fontSize: '0.84rem', color: 'var(--rtw-text-primary)' }}>
                         {tr.title}
                       </span>
                       <span
@@ -1158,13 +1231,13 @@ export function ExcelImportModule() {
                         {tr.passed ? 'PASSED' : 'FAILED'} · {tr.batchStatus}
                       </span>
                     </div>
-                    <p style={{ fontSize: '0.76rem', color: '#334155', marginBottom: '6px' }}>
+                    <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-secondary)', marginBottom: '6px' }}>
                       {tr.scenarioDescription}
                     </p>
-                    <div style={{ fontSize: '0.75rem', color: '#1e293b', fontWeight: 700, marginBottom: '4px' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--rtw-text-primary)', fontWeight: 700, marginBottom: '4px' }}>
                       Resultado: {tr.actualOutcome}
                     </div>
-                    <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.73rem', color: '#475569' }}>
+                    <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.73rem', color: 'var(--rtw-text-secondary)' }}>
                       {tr.details.map((d, i) => (
                         <li key={i}>{d}</li>
                       ))}
@@ -1181,7 +1254,7 @@ export function ExcelImportModule() {
               Función 11: Historial de Lotes de Importación ({persistedState.batchesHistory.length})
             </h3>
             {persistedState.batchesHistory.length === 0 ? (
-              <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
                 No se han ejecutado lotes de importación todavía.
               </p>
             ) : (
@@ -1214,7 +1287,7 @@ export function ExcelImportModule() {
                             borderRadius: '999px',
                             fontSize: '0.7rem',
                             fontWeight: 800,
-                            background: b.batchStatus === 'COMMITTED' ? '#dcfce7' : '#fee2e2',
+                            background: b.batchStatus === 'COMMITTED' ? 'var(--rtw-success-bg)' : 'var(--rtw-danger-bg)',
                             color: b.batchStatus === 'COMMITTED' ? '#166534' : '#b91c1c'
                           }}
                         >
@@ -1225,7 +1298,7 @@ export function ExcelImportModule() {
                       <td style={{ fontWeight: 800 }}>{b.totalOpeningUnits}</td>
                       <td>{formatCOP(b.totalConfirmedCostCop)}</td>
                       <td>{b.pendingCostCount}</td>
-                      <td style={{ fontSize: '0.73rem', color: '#475569' }}>
+                      <td style={{ fontSize: '0.73rem', color: 'var(--rtw-text-secondary)' }}>
                         {b.importedByEmail} · {new Date(b.createdAt).toLocaleString('es-CO')}
                       </td>
                     </tr>
@@ -1243,7 +1316,19 @@ export function ExcelImportModule() {
         title="Confirmar Importación Transaccional de Inventario Inicial"
         description={
           analysis
-            ? `Se ejecutará de forma atómica el lote ${analysis.batchCodePreview} (${analysis.idempotencyKey}) con ${analysis.rows.length} SKUs del propietario Eberto (OWN-0001), creando 37 movimientos inmutables OPENING_BALANCE por 38 unidades físicas, respetando 2 costos en estado PENDING_COST y descartando justificadamente 3 filas sin stock físico actual.`
+            ? (() => {
+                const openingRows = analysis.rows.filter(
+                  (r) => r.rowOutcome === 'IMPORTED_WITH_OPENING_BALANCE' && r.qtyPhysical > 0
+                );
+                const totalUnits = openingRows.reduce((s, r) => s + r.qtyPhysical, 0);
+                const pendingCostCount = analysis.rows.filter(
+                  (r) => r.costStatus === 'PENDING_COST'
+                ).length;
+                const ownersList = Array.from(
+                  new Set(analysis.rows.map((r) => r.ownerId).filter(Boolean))
+                ).join(', ');
+                return `Se ejecutará de forma atómica el lote ${analysis.batchCodePreview} (${analysis.idempotencyKey}) con ${analysis.rows.length} fila(s) para [${ownersList}], creando ${openingRows.length} movimiento(s) inmutable(s) OPENING_BALANCE por ${totalUnits} unidad(es) físicas, respetando ${pendingCostCount} costo(s) en estado PENDING_COST y descartando justificadamente ${analysis.discardedJustified.length} fila(s) sin stock físico actual.`;
+              })()
             : ''
         }
         ruleReminder="Se crean movimientos de inventario inicial inmutables vinculados al propietario seleccionado sin generar compras ni inventar costos o fechas."

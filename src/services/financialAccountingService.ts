@@ -24,6 +24,7 @@ import {
   getInventoryPurchaseState,
   saveInventoryPurchaseState
 } from './inventoryPurchaseService';
+import { isValidNonNegativeAmount } from '../utils/validations';
 
 export type AgreementStatus = 'pending_configuration' | 'active' | 'superseded' | 'cancelled';
 
@@ -250,6 +251,7 @@ export interface OwnerAccountStatement {
   collectableAttributableProfitCop: number;
   previousBalanceCop: number;
   previousSettledPaymentsCop: number;
+  pendingPaymentSettlementsCop: number;
   finalConciliatedBalanceCop: number;
   canSettle: boolean;
   settlementBlockReason: string | null;
@@ -611,17 +613,17 @@ export function updateLotAcquisitionAndDirectCosts(
   }
 
   if (
-    input.inboundShippingUnitCostCop < 0 ||
-    input.otherAcquisitionUnitCostCop < 0 ||
-    input.packagingUnitCostCop < 0 ||
-    input.attributableAdvertisingUnitCop < 0
+    !isValidNonNegativeAmount(input.inboundShippingUnitCostCop) ||
+    !isValidNonNegativeAmount(input.otherAcquisitionUnitCostCop) ||
+    !isValidNonNegativeAmount(input.packagingUnitCostCop) ||
+    !isValidNonNegativeAmount(input.attributableAdvertisingUnitCop)
   ) {
-    throw new Error('Los costos unitarios de transporte, empaque y publicidad no pueden ser negativos.');
+    throw new Error('Los costos unitarios de transporte, empaque y publicidad deben ser montos válidos >= 0.');
   }
 
   if (input.purchaseUnitCostCop !== undefined && input.purchaseUnitCostCop !== null) {
-    if (input.purchaseUnitCostCop < 0) {
-      throw new Error('El costo de compra unitario no puede ser negativo.');
+    if (!isValidNonNegativeAmount(input.purchaseUnitCostCop)) {
+      throw new Error('El costo de compra unitario debe ser un monto válido >= 0.');
     }
     alloc.purchaseUnitCostCop = input.purchaseUnitCostCop;
     alloc.costStatus = input.purchaseUnitCostCop === 0 ? 'BONUS_ZERO_COST' : 'CONFIRMED';
@@ -745,21 +747,27 @@ export function authorizeSkuCommercialPricing(
     throw new Error(`SKU "${input.sku}" no encontrado en configuración de precios.`);
   }
 
-  if (input.normalSalePriceCop <= 0 || input.minimumAllowedPriceCop <= 0) {
-    throw new Error('El precio normal y el precio mínimo deben ser mayores a 0 COP.');
+  if (
+    !Number.isFinite(input.normalSalePriceCop) ||
+    !Number.isFinite(input.minimumAllowedPriceCop) ||
+    input.normalSalePriceCop <= 0 ||
+    input.minimumAllowedPriceCop <= 0
+  ) {
+    throw new Error('El precio normal y el precio mínimo deben ser valores finitos mayores a 0 COP.');
   }
   if (input.minimumAllowedPriceCop > input.normalSalePriceCop) {
     throw new Error('El precio mínimo no puede ser superior al precio normal.');
   }
   if (
     input.promotionalPriceCop !== null &&
-    input.promotionalPriceCop < input.minimumAllowedPriceCop
+    (!Number.isFinite(input.promotionalPriceCop) ||
+      input.promotionalPriceCop < input.minimumAllowedPriceCop)
   ) {
     throw new Error(
       `El precio promocional (${input.promotionalPriceCop} COP) no puede ser inferior al precio mínimo autorizado (${input.minimumAllowedPriceCop} COP).`
     );
   }
-  if (input.maxDiscountPct < 0 || input.maxDiscountPct > 100) {
+  if (!Number.isFinite(input.maxDiscountPct) || input.maxDiscountPct < 0 || input.maxDiscountPct > 100) {
     throw new Error('El descuento máximo debe estar entre 0% y 100%.');
   }
   if (!input.changeReason || input.changeReason.trim().length < 5) {
@@ -819,7 +827,15 @@ export function authorizeSkuCommercialPricing(
   });
 
   finState.priceHistory.unshift(historyEntry);
-  if (!targetFinState) saveFinancialAccountingState(finState);
+  if (!targetFinState) {
+    saveFinancialAccountingState(finState);
+    const invState = getInventoryPurchaseState();
+    if (invState.catalog[cfg.sku]) {
+      invState.catalog[cfg.sku].approvedSalePriceCop = input.normalSalePriceCop;
+      invState.catalog[cfg.sku].updatedAt = nowIso;
+      saveInventoryPurchaseState(invState);
+    }
+  }
   return historyEntry;
 }
 
@@ -861,26 +877,47 @@ export function configureOwnerCommercialAgreement(
   const ownerId = input.ownerId.trim();
   if (!ownerId) throw new Error('El ID de propietario es obligatorio.');
 
+  let normalizedStoreCommPct = input.storeCommissionPct;
+  let normalizedOwnerSharePct = input.ownerSharePct;
+
   if (input.status === 'active') {
     if (
       !input.distributionModel ||
-      input.storeCommissionPct === null ||
-      input.ownerSharePct === null ||
       !input.settlementMethod ||
       !input.advertisingResponsibility ||
       !input.sharedExpensePolicy
     ) {
       throw new Error(
-        'Para activar un acuerdo comercial debe especificar explícitamente comisión REAL TWS, participación del propietario, método de liquidación, responsable de publicidad y política de gastos compartidos. Prohibido inventar porcentajes.'
+        'Para activar un acuerdo comercial debe especificar explícitamente modelo de distribución, método de liquidación, responsable de publicidad y política de gastos compartidos. Prohibido inventar porcentajes.'
+      );
+    }
+
+    if (input.distributionModel === 'attributable_profit') {
+      normalizedStoreCommPct = normalizedStoreCommPct ?? 0;
+      normalizedOwnerSharePct = normalizedOwnerSharePct ?? 100;
+    } else if (normalizedStoreCommPct === null || normalizedOwnerSharePct === null) {
+      throw new Error(
+        'Para este modelo de distribución debe especificar explícitamente % comisión REAL TWS y % participación del propietario.'
       );
     }
 
     if (
+      !Number.isFinite(normalizedStoreCommPct) ||
+      !Number.isFinite(normalizedOwnerSharePct) ||
+      normalizedStoreCommPct < 0 ||
+      normalizedStoreCommPct > 100 ||
+      normalizedOwnerSharePct < 0 ||
+      normalizedOwnerSharePct > 100
+    ) {
+      throw new Error('Los porcentajes del acuerdo comercial deben estar entre 0% y 100%.');
+    }
+
+    if (
       input.distributionModel === 'profit_split_pct' &&
-      Math.abs(input.storeCommissionPct + input.ownerSharePct - 100) > 0.01
+      Math.abs(normalizedStoreCommPct + normalizedOwnerSharePct - 100) > 0.01
     ) {
       throw new Error(
-        `En el modelo profit_split_pct, la suma de comisión REAL TWS (${input.storeCommissionPct}%) y participación del propietario (${input.ownerSharePct}%) debe ser exactamente 100%.`
+        `En el modelo profit_split_pct, la suma de comisión REAL TWS (${normalizedStoreCommPct}%) y participación del propietario (${normalizedOwnerSharePct}%) debe ser exactamente 100%.`
       );
     }
   }
@@ -893,11 +930,11 @@ export function configureOwnerCommercialAgreement(
     id: code,
     agreementCode: code,
     ownerId,
-    ownerName: input.ownerName.trim() || ownerId,
+    ownerName: input.ownerName.trim() || existing?.ownerName || ownerId,
     status: input.status,
     distributionModel: input.distributionModel,
-    storeCommissionPct: input.storeCommissionPct,
-    ownerSharePct: input.ownerSharePct,
+    storeCommissionPct: normalizedStoreCommPct,
+    ownerSharePct: normalizedOwnerSharePct,
     minimumPriceGuardPct: input.minimumPriceGuardPct,
     maxDiscountAllowedPct: input.maxDiscountAllowedPct,
     commercialAuthorizationMode: input.commercialAuthorizationMode,
@@ -913,21 +950,24 @@ export function configureOwnerCommercialAgreement(
 
   finState.agreements[ownerId] = updated;
 
-  // Recalcular comisión en ventas existentes del propietario si el acuerdo pasa a activo
-  for (const idx of finState.salesAllocations.keys()) {
-    const sale = finState.salesAllocations[idx];
-    if (sale.ownerId === ownerId) {
-      const recalc = computeSaleCommissionAndOwnerProfit(
-        sale.netRevenueCop,
-        sale.grossProfitBeforeCommissionCop,
-        updated
-      );
-      finState.salesAllocations[idx] = Object.freeze({
-        ...sale,
-        storeCommissionCop: recalc.storeCommissionCop,
-        attributableOwnerProfitCop: recalc.attributableOwnerProfitCop,
-        commissionStatus: recalc.commissionStatus
-      });
+  // Solo regularizar ventas previamente marcadas PENDING_AGREEMENT al activar por primera vez;
+  // nunca alterar retrospectivamente snapshots históricos ya liquidados o con acuerdo previo calculado.
+  if (updated.status === 'active') {
+    for (const idx of finState.salesAllocations.keys()) {
+      const sale = finState.salesAllocations[idx];
+      if (sale.ownerId === ownerId && sale.commissionStatus === 'PENDING_AGREEMENT') {
+        const recalc = computeSaleCommissionAndOwnerProfit(
+          sale.netRevenueCop,
+          sale.grossProfitBeforeCommissionCop,
+          updated
+        );
+        finState.salesAllocations[idx] = Object.freeze({
+          ...sale,
+          storeCommissionCop: recalc.storeCommissionCop,
+          attributableOwnerProfitCop: recalc.attributableOwnerProfitCop,
+          commissionStatus: recalc.commissionStatus
+        });
+      }
     }
   }
 
@@ -935,7 +975,7 @@ export function configureOwnerCommercialAgreement(
   return updated;
 }
 
-function computeSaleCommissionAndOwnerProfit(
+export function computeSaleCommissionAndOwnerProfit(
   netRevenueCop: number,
   grossProfitBeforeCommissionCop: number,
   agreement: OwnerCommercialAgreement | undefined
@@ -1068,8 +1108,8 @@ export function txRecordMultiOwnerDispatchedSale(
     const uncollected = sliceNetRevenue - collectedCash;
 
     const rec: DispatchedSaleAllocationRecord = Object.freeze({
-      id: `SIA-${input.orderNumber}-${slice.ownerId}-${idx + 1}`,
-      allocationSaleCode: `SIA-${input.orderNumber}-${idx + 1}`,
+      id: `SIA-${input.orderNumber}-${input.sku}-${slice.lotAllocationId}-${idx + 1}`,
+      allocationSaleCode: `SIA-${input.orderNumber}-${input.sku}-${idx + 1}`,
       orderNumber: input.orderNumber,
       saleDate: input.saleDate,
       sku: input.sku,
@@ -1172,6 +1212,35 @@ export function txRecordReturnOnDispatchedSale(
   return updated;
 }
 
+export function txSyncDispatchedOrderPaymentCollection(
+  input: {
+    orderNumber: string;
+    collectedRatioPct: number;
+  },
+  targetFinState?: FinancialAccountingStoreState
+): number {
+  const finState = targetFinState ?? getFinancialAccountingState();
+  const clampedPct = Math.max(0, Math.min(100, input.collectedRatioPct));
+  let updatedCount = 0;
+
+  finState.salesAllocations = finState.salesAllocations.map((sale) => {
+    if (sale.orderNumber !== input.orderNumber) return sale;
+    const collectedCash = Math.round(Math.max(0, sale.netRevenueCop) * (clampedPct / 100));
+    const uncollected = Math.max(0, sale.netRevenueCop - collectedCash);
+    updatedCount += 1;
+    return Object.freeze({
+      ...sale,
+      collectedCashCop: collectedCash,
+      uncollectedReceivableCop: uncollected
+    });
+  });
+
+  if (updatedCount > 0 && !targetFinState) {
+    saveFinancialAccountingState(finState);
+  }
+  return updatedCount;
+}
+
 // ============================================================================
 // 6. REGISTRO DE GASTOS DIRECTOS Y COMPARTIDOS (BLOQUEO DE CRITERIOS NO APROBADOS)
 // ============================================================================
@@ -1193,15 +1262,23 @@ export function txRegisterAndAllocateExpense(
   targetFinState?: FinancialAccountingStoreState
 ): FinancialExpenseRecord {
   const finState = targetFinState ?? getFinancialAccountingState();
+  const invState = getInventoryPurchaseState();
+  const expenseCode = input.expenseCode.trim();
 
-  if (input.totalAmountCop <= 0) {
-    throw new Error('El valor total del gasto debe ser mayor a 0 COP.');
+  if (!expenseCode) {
+    throw new Error('El código de gasto es obligatorio.');
+  }
+  if (finState.expenses.some((e) => e.expenseCode === expenseCode)) {
+    throw new Error(`El gasto con código "${expenseCode}" ya fue registrado anteriormente.`);
+  }
+  if (!isValidNonNegativeAmount(input.totalAmountCop) || input.totalAmountCop <= 0) {
+    throw new Error('El valor total del gasto debe ser un monto válido mayor a 0 COP.');
   }
 
   // Regla obligatoria: No aplicar criterios no aprobados
   if (input.approvalStatus !== 'approved') {
     throw new Error(
-      `BLOQUEO DE CRITERIO NO APROBADO: El gasto "${input.expenseCode}" tiene estado "${input.approvalStatus}". Prohibido aplicar o distribuir gastos cuyo criterio no haya sido aprobado explícitamente.`
+      `BLOQUEO DE CRITERIO NO APROBADO: El gasto "${expenseCode}" tiene estado "${input.approvalStatus}". Prohibido aplicar o distribuir gastos cuyo criterio no haya sido aprobado explícitamente.`
     );
   }
 
@@ -1213,9 +1290,10 @@ export function txRegisterAndAllocateExpense(
       throw new Error('Para un gasto directo es obligatorio seleccionar el propietario afectado.');
     }
     const agr = finState.agreements[ownerId];
+    const ownerObj = invState.owners.find((o) => o.id === ownerId);
     slices.push({
       ownerId,
-      ownerName: agr?.ownerName || ownerId,
+      ownerName: agr?.ownerName || ownerObj?.fullName || ownerId,
       allocatedAmountCop: input.totalAmountCop,
       allocationPercentage: 100,
       basisValue: input.totalAmountCop,
@@ -1260,11 +1338,21 @@ export function txRegisterAndAllocateExpense(
         });
       });
     } else {
-      // Calcular base por propietario según ventas netas, COGS o unidades vendidas
-      const ownerIds = Object.keys(finState.agreements);
+      // Calcular base por propietario (incluye propietarios activos en invState.owners)
+      // excluyendo explícitamente quienes tengan sharedExpensePolicy === 'excluded_from_shared'
+      const ownerIds = Array.from(
+        new Set([
+          ...Object.keys(finState.agreements),
+          ...invState.owners.filter((o) => o.status === 'active').map((o) => o.id)
+        ])
+      ).filter(
+        (oid) => finState.agreements[oid]?.sharedExpensePolicy !== 'excluded_from_shared'
+      );
+
       const basisByOwner: Array<{ ownerId: string; ownerName: string; basis: number }> =
         ownerIds.map((oid) => {
           const ownerSales = finState.salesAllocations.filter((s) => s.ownerId === oid);
+          const ownerObj = invState.owners.find((o) => o.id === oid);
           const basis =
             input.allocationCriterion === 'proportional_net_sales'
               ? ownerSales.reduce((acc, s) => acc + s.netRevenueCop, 0)
@@ -1273,7 +1361,7 @@ export function txRegisterAndAllocateExpense(
                 : ownerSales.reduce((acc, s) => acc + s.netQtySold, 0);
           return {
             ownerId: oid,
-            ownerName: finState.agreements[oid]?.ownerName || oid,
+            ownerName: finState.agreements[oid]?.ownerName || ownerObj?.fullName || oid,
             basis
           };
         }).filter((b) => b.basis > 0);
@@ -1332,7 +1420,8 @@ export function txRegisterAndAllocateExpense(
 // 7. ESTADO DE CUENTA INDIVIDUAL POR PROPIETARIO Y REPORTE CONSOLIDADO
 // ============================================================================
 export function buildOwnerAccountStatements(
-  finState: FinancialAccountingStoreState
+  finState: FinancialAccountingStoreState,
+  options?: { periodStart?: string; periodEnd?: string }
 ): OwnerAccountStatement[] {
   const invState = getInventoryPurchaseState();
   const ownerIds = Array.from(
@@ -1341,15 +1430,25 @@ export function buildOwnerAccountStatements(
       ...invState.owners.map((o) => o.id)
     ])
   );
+  const periodStart = options?.periodStart?.trim() || '';
+  const periodEnd = options?.periodEnd?.trim() || '';
+  const inPeriod = (dateStr: string) => {
+    if (!periodStart && !periodEnd) return true;
+    const d = dateStr.slice(0, 10);
+    if (periodStart && d < periodStart) return false;
+    if (periodEnd && d > periodEnd) return false;
+    return true;
+  };
 
   return ownerIds.map((ownerId) => {
+    const ownerRecord = invState.owners.find((o) => o.id === ownerId);
     const agreement =
       finState.agreements[ownerId] || {
         ...createInitialEbertoAgreement(),
         id: `AGR-${ownerId}`,
         agreementCode: `AGR-${ownerId}`,
         ownerId,
-        ownerName: ownerId
+        ownerName: ownerRecord?.fullName || ownerId
       };
 
     const agreementIsPending = agreement.status !== 'active';
@@ -1361,7 +1460,9 @@ export function buildOwnerAccountStatements(
       0
     );
 
-    const sales = finState.salesAllocations.filter((s) => s.ownerId === ownerId);
+    const sales = finState.salesAllocations.filter(
+      (s) => s.ownerId === ownerId && inPeriod(s.saleDate)
+    );
     const dispatchedUnitsGross = sales.reduce((s, x) => s + x.qtyDispatched, 0);
     const returnedUnits = sales.reduce((s, x) => s + x.qtyReturned, 0);
     const netUnitsSold = sales.reduce((s, x) => s + x.netQtySold, 0);
@@ -1385,6 +1486,7 @@ export function buildOwnerAccountStatements(
 
     for (const exp of finState.expenses) {
       if (exp.approvalStatus !== 'approved') continue;
+      if (!inPeriod(exp.expenseDate)) continue;
       for (const sl of exp.slices) {
         if (sl.ownerId !== ownerId) continue;
         if (exp.category === 'Publicidad Atribuible') {
@@ -1421,10 +1523,17 @@ export function buildOwnerAccountStatements(
       0
     );
 
-    const ownerSettlements = finState.settlements.filter(
-      (st) => st.ownerId === ownerId && st.approvalState !== 'conciliated_draft'
+    const paidSettlements = finState.settlements.filter(
+      (st) => st.ownerId === ownerId && st.approvalState === 'paid_documented' && inPeriod(st.settlementDate)
     );
-    const previousSettledPaymentsCop = ownerSettlements.reduce(
+    const pendingSettlements = finState.settlements.filter(
+      (st) => st.ownerId === ownerId && st.approvalState === 'approved_pending_payment' && inPeriod(st.settlementDate)
+    );
+    const previousSettledPaymentsCop = paidSettlements.reduce(
+      (s, st) => s + st.amountApprovedToSettleCop,
+      0
+    );
+    const pendingPaymentSettlementsCop = pendingSettlements.reduce(
       (s, st) => s + st.amountApprovedToSettleCop,
       0
     );
@@ -1433,9 +1542,11 @@ export function buildOwnerAccountStatements(
     const finalConciliatedBalanceCop =
       previousBalanceCop + attributableNetProfitCop - previousSettledPaymentsCop;
 
-    // Diferenciar utilidad devengada vs dinero efectivamente recibido
+    // Diferenciar utilidad devengada vs dinero efectivamente recaudado y no comprometido aún en otra orden de pago
     const collectableAttributableProfitCop =
-      finalConciliatedBalanceCop - uncollectedReceivablesCop;
+      finalConciliatedBalanceCop -
+      uncollectedReceivablesCop -
+      pendingPaymentSettlementsCop;
 
     let canSettle = true;
     let settlementBlockReason: string | null = null;
@@ -1450,7 +1561,7 @@ export function buildOwnerAccountStatements(
     } else if (collectableAttributableProfitCop <= 0) {
       canSettle = false;
       settlementBlockReason =
-        'CARTERA PENDIENTE DE RECAUDO: Las ventas aún no han sido efectivamente cobradas en caja.';
+        'CARTERA PENDIENTE O SALDO YA COMPROMETIDO: Las ventas no han sido recaudadas o ya cuentan con liquidación aprobada pendiente de pago.';
     }
 
     return {
@@ -1483,6 +1594,7 @@ export function buildOwnerAccountStatements(
       collectableAttributableProfitCop,
       previousBalanceCop,
       previousSettledPaymentsCop,
+      pendingPaymentSettlementsCop,
       finalConciliatedBalanceCop,
       canSettle,
       settlementBlockReason
@@ -1508,6 +1620,16 @@ export function txCreateConciliatedSettlement(
   targetFinState?: FinancialAccountingStoreState
 ): OwnerSettlementRecord {
   const finState = targetFinState ?? getFinancialAccountingState();
+  const code = input.settlementCode.trim();
+  if (!code) {
+    throw new Error('El código de liquidación es obligatorio.');
+  }
+  if (finState.settlements.some((s) => s.settlementCode === code)) {
+    throw new Error(`El código de liquidación "${code}" ya existe. Use un código único.`);
+  }
+  if (!input.periodStart?.trim() || !input.periodEnd?.trim() || input.periodStart > input.periodEnd) {
+    throw new Error('El rango de fechas de liquidación es inválido (Inicio debe ser <= Fin).');
+  }
 
   if (!input.isConciliatedConfirmed) {
     throw new Error(
@@ -1515,8 +1637,8 @@ export function txCreateConciliatedSettlement(
     );
   }
 
-  const statements = buildOwnerAccountStatements(finState);
-  const st = statements.find((s) => s.ownerId === input.ownerId);
+  const overallStatements = buildOwnerAccountStatements(finState);
+  const st = overallStatements.find((s) => s.ownerId === input.ownerId);
   if (!st) {
     throw new Error(`No existe estado de cuenta para el propietario "${input.ownerId}".`);
   }
@@ -1533,8 +1655,8 @@ export function txCreateConciliatedSettlement(
     );
   }
 
-  if (input.amountToSettleCop <= 0) {
-    throw new Error('El monto a liquidar debe ser mayor a 0 COP.');
+  if (!isValidNonNegativeAmount(input.amountToSettleCop) || input.amountToSettleCop <= 0) {
+    throw new Error('El monto a liquidar debe ser un valor válido mayor a 0 COP.');
   }
 
   if (input.amountToSettleCop > st.collectableAttributableProfitCop) {
@@ -1547,33 +1669,41 @@ export function txCreateConciliatedSettlement(
     throw new Error('Debe registrar el número de comprobante / soporte de conciliación.');
   }
 
+  const periodSt =
+    buildOwnerAccountStatements(finState, {
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd
+    }).find((s) => s.ownerId === input.ownerId) || st;
+
   const nowIso = new Date().toISOString();
-  const remaining = st.finalConciliatedBalanceCop - input.amountToSettleCop;
+  const remaining =
+    st.finalConciliatedBalanceCop - st.pendingPaymentSettlementsCop - input.amountToSettleCop;
 
   const settlement: OwnerSettlementRecord = Object.freeze({
-    id: input.settlementCode.trim(),
-    settlementCode: input.settlementCode.trim(),
+    id: code,
+    settlementCode: code,
     settlementDate: nowIso.slice(0, 10),
     ownerId: st.ownerId,
     ownerName: st.ownerName,
     agreementCode: st.agreement.agreementCode,
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,
-    grossSalesPeriodCop: st.grossSalesCop,
-    discountsAndReturnsPeriodCop: st.discountsProratedCop + st.returnsProratedCop,
-    netSalesPeriodCop: st.netSalesCop,
-    cogsPeriodCop: st.cogsSoldCop,
+    grossSalesPeriodCop: periodSt.grossSalesCop,
+    discountsAndReturnsPeriodCop: periodSt.discountsProratedCop + periodSt.returnsProratedCop,
+    netSalesPeriodCop: periodSt.netSalesCop,
+    cogsPeriodCop: periodSt.cogsSoldCop,
     directExpensesPeriodCop:
-      st.directOwnerExpensesCop + st.packagingAndDirectSaleExpensesCop,
-    sharedExpensesPeriodCop: st.sharedAllocatedExpensesCop,
-    attributableAdPeriodCop: st.attributableAdvertisingCop,
-    storeCommissionPeriodCop: st.storeCommissionCop ?? 0,
-    attributableProfitPeriodCop: st.attributableNetProfitCop,
-    collectedSalesCashCop: st.collectedCashFromSalesCop,
-    uncollectedReceivableCop: st.uncollectedReceivablesCop,
+      periodSt.directOwnerExpensesCop + periodSt.packagingAndDirectSaleExpensesCop,
+    sharedExpensesPeriodCop: periodSt.sharedAllocatedExpensesCop,
+    attributableAdPeriodCop: periodSt.attributableAdvertisingCop,
+    storeCommissionPeriodCop: periodSt.storeCommissionCop ?? 0,
+    attributableProfitPeriodCop: periodSt.attributableNetProfitCop,
+    collectedSalesCashCop: periodSt.collectedCashFromSalesCop,
+    uncollectedReceivableCop: periodSt.uncollectedReceivablesCop,
     previousBalanceCop: st.previousBalanceCop,
     previousPaymentsCop: st.previousSettledPaymentsCop,
-    availableBalanceBeforeSettlementCop: st.finalConciliatedBalanceCop,
+    availableBalanceBeforeSettlementCop:
+      st.finalConciliatedBalanceCop - st.pendingPaymentSettlementsCop,
     amountApprovedToSettleCop: input.amountToSettleCop,
     finalRemainingBalanceCop: remaining,
     voucherReference: input.voucherReference.trim(),
@@ -1589,6 +1719,41 @@ export function txCreateConciliatedSettlement(
   finState.settlements.unshift(settlement);
   if (!targetFinState) saveFinancialAccountingState(finState);
   return settlement;
+}
+
+export function txMarkSettlementPaid(
+  input: {
+    settlementId: string;
+    paymentVoucherReference: string;
+  },
+  actorEmail: string,
+  targetFinState?: FinancialAccountingStoreState
+): OwnerSettlementRecord {
+  const finState = targetFinState ?? getFinancialAccountingState();
+  const idx = finState.settlements.findIndex(
+    (s) => s.id === input.settlementId || s.settlementCode === input.settlementId
+  );
+  if (idx === -1) {
+    throw new Error(`No existe la liquidación "${input.settlementId}".`);
+  }
+  const current = finState.settlements[idx];
+  if (current.approvalState === 'paid_documented') {
+    throw new Error(`La liquidación ${current.settlementCode} ya figura como PAGADA DOCUMENTADA.`);
+  }
+  if (!input.paymentVoucherReference || input.paymentVoucherReference.trim().length < 3) {
+    throw new Error('Debe indicar el número de soporte o transferencia bancaria del pago.');
+  }
+
+  const updated: OwnerSettlementRecord = Object.freeze({
+    ...current,
+    approvalState: 'paid_documented',
+    voucherReference: `${current.voucherReference} | Pago: ${input.paymentVoucherReference.trim()}`,
+    notes: `${current.notes ? current.notes + ' | ' : ''}Desembolso confirmado por ${actorEmail}`
+  });
+
+  finState.settlements[idx] = updated;
+  if (!targetFinState) saveFinancialAccountingState(finState);
+  return updated;
 }
 
 // ============================================================================
@@ -1971,17 +2136,18 @@ export function runFinancialAccountingTestSuite(
 
   const test6Passed =
     partialSettlement.amountApprovedToSettleCop === 30000 &&
-    stOwn1AfterLiq.previousSettledPaymentsCop === 30000 &&
-    stOwn1AfterLiq.finalConciliatedBalanceCop ===
-      stOwn1BeforeLiq.finalConciliatedBalanceCop - 30000 &&
+    stOwn1AfterLiq.pendingPaymentSettlementsCop === 30000 &&
+    stOwn1AfterLiq.previousSettledPaymentsCop === 0 &&
+    stOwn1AfterLiq.collectableAttributableProfitCop ===
+      stOwn1BeforeLiq.collectableAttributableProfitCop - 30000 &&
     partialSettlement.approvalState === 'approved_pending_payment';
 
   results.push({
     testId: 'FIN-TEST-06',
     title: '6. Liquidación parcial bajo conciliación (Sin pago automático)',
-    scenario: `Sobre una utilidad neta disponible de $${stOwn1BeforeLiq.finalConciliatedBalanceCop.toLocaleString('es-CO')} COP de OWN-0001, se aprueba una liquidación parcial de $30.000 COP.`,
-    expected: `Pagos anteriores pasan a $30.000 COP y el saldo final pendiente queda en $${(stOwn1BeforeLiq.finalConciliatedBalanceCop - 30000).toLocaleString('es-CO')} COP en estado approved_pending_payment.`,
-    actual: `Disponible antes: $${stOwn1BeforeLiq.finalConciliatedBalanceCop.toLocaleString('es-CO')} | Liquidado parcial: $30.000 | Saldo final: $${stOwn1AfterLiq.finalConciliatedBalanceCop.toLocaleString('es-CO')} COP.`,
+    scenario: `Sobre un saldo recaudado disponible de $${stOwn1BeforeLiq.collectableAttributableProfitCop.toLocaleString('es-CO')} COP de OWN-0001, se aprueba una liquidación parcial de $30.000 COP en estado approved_pending_payment.`,
+    expected: `Liquidaciones pendientes de pago pasan a $30.000 COP y el saldo liquidable baja a $${(stOwn1BeforeLiq.collectableAttributableProfitCop - 30000).toLocaleString('es-CO')} COP sin marcar pago automático.`,
+    actual: `Disponible antes: $${stOwn1BeforeLiq.collectableAttributableProfitCop.toLocaleString('es-CO')} | Pendiente pago: $${stOwn1AfterLiq.pendingPaymentSettlementsCop.toLocaleString('es-CO')} | Saldo liquidable restante: $${stOwn1AfterLiq.collectableAttributableProfitCop.toLocaleString('es-CO')} COP.`,
     passed: test6Passed,
     details: [
       `Comprobante: ${partialSettlement.voucherReference} (${partialSettlement.approvalState}).`,

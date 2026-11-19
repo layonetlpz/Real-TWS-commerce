@@ -69,12 +69,12 @@ export function SettingsConfigModule() {
   const { userProfile, activeEffectiveRole } = useAuth();
   const { notify } = useNotifications();
   const canEditSettings = activeEffectiveRole === 'ADMIN';
-  const canEditCategories =
-    activeEffectiveRole === 'ADMIN' || activeEffectiveRole === 'INVENTORY_OPERATOR';
+  const canEditCategories = activeEffectiveRole === 'ADMIN';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [togglingCategoryId, setTogglingCategoryId] = useState<string | null>(null);
   const [settingsRow, setSettingsRow] = useState<DbBusinessSettingsRow | null>(null);
   const [form, setForm] = useState<SettingsFormState>(DEFAULT_SETTINGS_FORM);
   const [categories, setCategories] = useState<DbCategoryRow[]>([]);
@@ -94,11 +94,15 @@ export function SettingsConfigModule() {
       fetchLiveCategories()
     ]);
 
-    if (settingsRes.error && categoriesRes.error) {
-      setError(`${settingsRes.error} | ${categoriesRes.error}`);
-    } else {
+    if (settingsRes.error || categoriesRes.error) {
+      const errs = [settingsRes.error, categoriesRes.error].filter(Boolean).join(' | ');
+      setError(errs);
+    }
+    if (!settingsRes.error) {
       setSettingsRow(settingsRes.data);
       setForm(mapSettingsToForm(settingsRes.data));
+    }
+    if (!categoriesRes.error) {
       setCategories(categoriesRes.data);
     }
     setLoading(false);
@@ -179,26 +183,31 @@ export function SettingsConfigModule() {
 
   const handleToggleCategory = useCallback(
     async (row: DbCategoryRow) => {
-      if (!canEditCategories) return;
-      const { error: toggleErr } = await upsertLiveCategory({
-        id: row.id,
-        code: row.code,
-        name: row.name,
-        description: row.description ?? '',
-        is_active: !row.is_active
-      });
-      if (toggleErr) {
-        notify('error', 'Error actualizando categoría', toggleErr);
-        return;
+      if (!canEditCategories || togglingCategoryId) return;
+      setTogglingCategoryId(row.id);
+      try {
+        const { error: toggleErr } = await upsertLiveCategory({
+          id: row.id,
+          code: row.code,
+          name: row.name,
+          description: row.description ?? '',
+          is_active: !row.is_active
+        });
+        if (toggleErr) {
+          notify('error', 'Error actualizando categoría', toggleErr);
+          return;
+        }
+        await loadData();
+        notify(
+          'info',
+          row.is_active ? 'Categoría desactivada' : 'Categoría activada',
+          `${row.code} — ${row.name}`
+        );
+      } finally {
+        setTogglingCategoryId(null);
       }
-      await loadData();
-      notify(
-        'info',
-        row.is_active ? 'Categoría desactivada' : 'Categoría activada',
-        `${row.code} — ${row.name}`
-      );
     },
-    [canEditCategories, loadData, notify]
+    [canEditCategories, togglingCategoryId, loadData, notify]
   );
 
   const categoryColumns = useMemo<TableColumn<DbCategoryRow>[]>(
@@ -219,7 +228,7 @@ export function SettingsConfigModule() {
         key: 'description',
         header: 'Descripción',
         render: (row) => (
-          <span style={{ color: '#475569', fontSize: '0.82rem' }}>
+          <span style={{ color: 'var(--rtw-text-secondary)', fontSize: '0.82rem' }}>
             {row.description || 'Sin descripción'}
           </span>
         )
@@ -244,16 +253,21 @@ export function SettingsConfigModule() {
             <button
               type="button"
               className="rtw-btn rtw-btn-outline btn-sm"
+              disabled={togglingCategoryId === row.id}
               onClick={() => void handleToggleCategory(row)}
             >
-              {row.is_active ? 'Desactivar' : 'Activar'}
+              {togglingCategoryId === row.id
+                ? 'Actualizando...'
+                : row.is_active
+                  ? 'Desactivar'
+                  : 'Activar'}
             </button>
           ) : (
-            <span style={{ color: '#64748b', fontSize: '0.78rem' }}>Solo lectura</span>
+            <span style={{ color: 'var(--rtw-text-muted)', fontSize: '0.78rem' }}>Solo lectura</span>
           )
       }
     ],
-    [canEditCategories, handleToggleCategory]
+    [canEditCategories, togglingCategoryId, handleToggleCategory]
   );
 
   if (loading) {
@@ -311,7 +325,7 @@ export function SettingsConfigModule() {
       )}
 
       {activeTab === 'GENERAL' && (
-      <form onSubmit={(e) => void handleSaveSettings(e)} className="rtw-card">
+      <form onSubmit={(e) => void handleSaveSettings(e)} className="rtw-card" noValidate>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
           <Settings size={18} color="var(--rtw-gold-ink)" />
           <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
@@ -445,8 +459,8 @@ export function SettingsConfigModule() {
                 gap: '10px',
                 padding: '12px',
                 borderRadius: '8px',
-                border: '1px solid #e2e8f0',
-                backgroundColor: '#f8fafc',
+                border: '1px solid var(--rtw-border-light)',
+                backgroundColor: 'var(--rtw-bg-subtle)',
                 cursor: canEditSettings ? 'pointer' : 'not-allowed'
               }}
             >
@@ -458,10 +472,10 @@ export function SettingsConfigModule() {
                 style={{ marginTop: '3px', width: '16px', height: '16px' }}
               />
               <span>
-                <strong style={{ display: 'block', fontSize: '0.84rem', color: '#0f172a' }}>
+                <strong style={{ display: 'block', fontSize: '0.84rem', color: 'var(--rtw-text-primary)' }}>
                   {item.title}
                 </strong>
-                <span style={{ fontSize: '0.76rem', color: '#64748b' }}>{item.desc}</span>
+                <span style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>{item.desc}</span>
               </span>
             </label>
           ))}
@@ -474,11 +488,11 @@ export function SettingsConfigModule() {
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: '12px',
-            borderTop: '1px solid #e2e8f0',
+            borderTop: '1px solid var(--rtw-border-light)',
             paddingTop: '14px'
           }}
         >
-          <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
             {settingsRow?.updated_at
               ? `Última actualización registrada: ${new Date(settingsRow.updated_at).toLocaleString('es-CO')}`
               : 'Sin cambios personalizados guardados aún.'}
@@ -532,6 +546,7 @@ export function SettingsConfigModule() {
             onSubmit={(e) => void handleCreateOrUpdateCategory(e)}
             className="rtw-filter-bar"
             style={{ marginBottom: '16px' }}
+            noValidate
           >
             <div className="rtw-field" style={{ flex: '0 1 160px' }}>
               <label className="rtw-label" htmlFor="cat-code-input">

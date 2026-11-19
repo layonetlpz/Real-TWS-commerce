@@ -164,6 +164,7 @@ export interface AutomationEngineStoreState {
   queue: AutomationQueueJobRecord[];
   logs: AutomationExecutionLogRecord[];
   generatedArtifacts: AutomationGeneratedArtifact[];
+  lastQuotaResetDate?: string;
 }
 
 const AUTOMATION_ENGINE_STORAGE_KEY = 'rtw_automation_engine_orchestrator_v1';
@@ -332,8 +333,25 @@ export function buildDefaultAutomationRules(): AutomationRuleDefinition[] {
 
 let inMemoryAutomationState: AutomationEngineStoreState | null = null;
 
+function getTodayDateStringLocal(): string {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function resetDailyQuotasIfNeeded(state: AutomationEngineStoreState): boolean {
+  const today = getTodayDateStringLocal();
+  if (state.lastQuotaResetDate === today) return false;
+  for (const r of state.rules) {
+    r.dailyExecutionsUsed = 0;
+  }
+  state.lastQuotaResetDate = today;
+  return true;
+}
+
 export function getAutomationEngineState(): AutomationEngineStoreState {
   if (inMemoryAutomationState) {
+    if (resetDailyQuotasIfNeeded(inMemoryAutomationState)) {
+      saveAutomationEngineState(inMemoryAutomationState);
+    }
     return inMemoryAutomationState;
   }
   try {
@@ -342,6 +360,9 @@ export function getAutomationEngineState(): AutomationEngineStoreState {
       const parsed = JSON.parse(raw) as AutomationEngineStoreState;
       if (parsed && Array.isArray(parsed.rules) && parsed.rules.length === 14) {
         inMemoryAutomationState = parsed;
+        if (resetDailyQuotasIfNeeded(parsed)) {
+          saveAutomationEngineState(parsed);
+        }
         return parsed;
       }
     }
@@ -353,7 +374,8 @@ export function getAutomationEngineState(): AutomationEngineStoreState {
     executedIdempotencyKeys: {},
     queue: [],
     logs: [],
-    generatedArtifacts: []
+    generatedArtifacts: [],
+    lastQuotaResetDate: getTodayDateStringLocal()
   };
   inMemoryAutomationState = initial;
   saveAutomationEngineState(initial);
@@ -382,9 +404,9 @@ export function updateAutomationRuleConfig(input: {
   maxDailyExecutions?: number;
   actorRole: string;
 }): AutomationRuleDefinition {
-  if (input.actorRole === 'OWNER') {
+  if (input.actorRole !== 'ADMIN') {
     throw new Error(
-      'BLOQUEO DE PERMISOS RBAC: El rol OWNER tiene acceso de lectura a sus reportes, pero no está autorizado para modificar reglas del motor de automatización.'
+      `BLOQUEO DE PERMISOS RBAC: El rol ${input.actorRole || 'NO_AUTORIZADO'} no está autorizado para modificar reglas del motor de automatización (solo ADMIN).`
     );
   }
 
@@ -396,6 +418,9 @@ export function updateAutomationRuleConfig(input: {
 
   rule.isEnabled = input.isEnabled;
   if (input.lowStockThresholdUnits !== undefined) {
+    if (!Number.isFinite(input.lowStockThresholdUnits) || !Number.isInteger(input.lowStockThresholdUnits)) {
+      throw new Error('El umbral de stock bajo debe ser un entero >= 1.');
+    }
     rule.conditions.lowStockThresholdUnits = Math.max(1, input.lowStockThresholdUnits);
   }
   if (input.projectionHorizonDays !== undefined) {
@@ -503,9 +528,9 @@ export function dispatchAutomationEvent(
   wasDuplicateBlocked: boolean;
   wasRecoveredAfterRetry: boolean;
 } {
-  if (input.actorRole === 'OWNER') {
+  if (input.actorRole !== 'ADMIN') {
     throw new Error(
-      'BLOQUEO DE PERMISOS: El rol OWNER no tiene permisos para disparar eventos del motor de automatización.'
+      `BLOQUEO DE PERMISOS: El rol ${input.actorRole || 'NO_AUTORIZADO'} no tiene permisos para disparar eventos del motor de automatización (solo ADMIN).`
     );
   }
 
@@ -515,8 +540,17 @@ export function dispatchAutomationEvent(
       'REGLA 2 OBLIGATORIA: Todo evento debe incluir una clave única idempotencyKey.'
     );
   }
+  const cleanSku = (input.sku || '').trim();
+  const cleanOwnerId = (input.ownerId || '').trim();
+  const cleanRefId = (input.referenceId || '').trim();
+  if (!cleanSku || !cleanOwnerId || !cleanRefId) {
+    throw new Error(
+      'SKU, Propietario (ownerId) e ID de referencia son obligatorios para despachar un evento auditable.'
+    );
+  }
 
   const state = customState ?? getAutomationEngineState();
+  resetDailyQuotasIfNeeded(state);
   const rule = state.rules.find((r) => r.eventType === input.eventType);
   if (!rule) {
     throw new Error(`No existe regla configurada para el evento ${input.eventType}.`);
@@ -536,9 +570,9 @@ export function dispatchAutomationEvent(
       ruleCode: rule.ruleCode,
       eventType: input.eventType,
       referenceEntity: input.referenceEntity,
-      referenceId: input.referenceId,
-      sku: input.sku,
-      ownerId: input.ownerId,
+      referenceId: cleanRefId,
+      sku: cleanSku,
+      ownerId: cleanOwnerId,
       status: 'blocked_duplicate_idempotency',
       errorClassification: 'NONE',
       retryCount: 0,
@@ -585,9 +619,9 @@ export function dispatchAutomationEvent(
       ruleCode: rule.ruleCode,
       eventType: input.eventType,
       referenceEntity: input.referenceEntity,
-      referenceId: input.referenceId,
-      sku: input.sku,
-      ownerId: input.ownerId,
+      referenceId: cleanRefId,
+      sku: cleanSku,
+      ownerId: cleanOwnerId,
       status: 'blocked_rule_disabled',
       errorClassification: 'NONE',
       retryCount: 0,
@@ -600,6 +634,21 @@ export function dispatchAutomationEvent(
       processedAt: nowIso
     };
     state.queue.unshift(disabledJob);
+    state.logs.unshift({
+      id: `LOG-${Date.now()}-${state.logs.length + 1}`,
+      logSeq: state.logs.length + 1,
+      timestamp: nowIso,
+      queueCode,
+      idempotencyKey: cleanKey,
+      eventType: input.eventType,
+      attemptNumber: 1,
+      status: 'blocked_rule_disabled',
+      errorClassification: 'NONE',
+      actionsExecuted: [],
+      detailMessage: disabledJob.outputSummary,
+      stockAndEconomicLedgerUntouched: true,
+      actor: input.actorName
+    });
     if (!customState) saveAutomationEngineState(state);
     return {
       queueItem: disabledJob,
@@ -617,9 +666,9 @@ export function dispatchAutomationEvent(
       ruleCode: rule.ruleCode,
       eventType: input.eventType,
       referenceEntity: input.referenceEntity,
-      referenceId: input.referenceId,
-      sku: input.sku,
-      ownerId: input.ownerId,
+      referenceId: cleanRefId,
+      sku: cleanSku,
+      ownerId: cleanOwnerId,
       status: 'blocked_quota_limit',
       errorClassification: 'NONE',
       retryCount: 0,
@@ -632,6 +681,21 @@ export function dispatchAutomationEvent(
       processedAt: nowIso
     };
     state.queue.unshift(quotaJob);
+    state.logs.unshift({
+      id: `LOG-${Date.now()}-${state.logs.length + 1}`,
+      logSeq: state.logs.length + 1,
+      timestamp: nowIso,
+      queueCode,
+      idempotencyKey: cleanKey,
+      eventType: input.eventType,
+      attemptNumber: 1,
+      status: 'blocked_quota_limit',
+      errorClassification: 'NONE',
+      actionsExecuted: [],
+      detailMessage: quotaJob.outputSummary,
+      stockAndEconomicLedgerUntouched: true,
+      actor: input.actorName
+    });
     if (!customState) saveAutomationEngineState(state);
     return {
       queueItem: quotaJob,

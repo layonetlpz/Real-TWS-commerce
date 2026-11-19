@@ -5,9 +5,11 @@ import {
 import {
   getFinancialAccountingState,
   buildOwnerAccountStatements,
+  computeSaleCommissionAndOwnerProfit,
   type FinancialExpenseRecord,
   type OwnerSettlementRecord
 } from './financialAccountingService';
+import { escapeHtml } from '../utils/formatters';
 import {
   getSalesOrdersCrmState,
   calculateOrderProfitability,
@@ -338,10 +340,18 @@ function resolveDateRange(criteria: BiFilterCriteria): { fromMs: number | null; 
   };
 }
 
+function parseDateInputSafe(isoOrDate: string): number {
+  const trimmed = isoOrDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return new Date(`${trimmed}T12:00:00`).getTime();
+  }
+  return new Date(trimmed).getTime();
+}
+
 function isDateWithinRange(isoOrDate: string | null | undefined, fromMs: number | null, toMs: number | null): boolean {
   if (!fromMs && !toMs) return true;
   if (!isoOrDate) return false;
-  const parsed = new Date(isoOrDate).getTime();
+  const parsed = parseDateInputSafe(isoOrDate);
   if (!Number.isFinite(parsed)) return true;
   if (fromMs !== null && parsed < fromMs) return false;
   if (toMs !== null && parsed > toMs) return false;
@@ -349,8 +359,9 @@ function isDateWithinRange(isoOrDate: string | null | undefined, fromMs: number 
 }
 
 function getWeekBucket(dateStr: string): string {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return 'Sin Fecha';
+  const parsedMs = parseDateInputSafe(dateStr);
+  if (!Number.isFinite(parsedMs)) return 'Sin Fecha';
+  const d = new Date(parsedMs);
   const temp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dayNum = temp.getUTCDay() || 7;
   temp.setUTCDate(temp.getUTCDate() + 4 - dayNum);
@@ -987,9 +998,19 @@ export function buildBusinessIntelligenceReport(criteria: BiFilterCriteria): BiR
     });
   });
 
+  const ownerOwnedSkus = new Set(
+    criteria.ownerId === 'ALL'
+      ? []
+      : allAllocations
+          .filter((a) => a.ownerId === criteria.ownerId)
+          .map((a) => a.sku)
+  );
+  const filteredCampaignIds = new Set(filteredCampaignPerfs.map((cp) => cp.campaign.id));
+
   const filteredLeads = allLeads.filter((lead) => {
     if (!isDateWithinRange(lead.createdAt, fromMs, toMs)) return false;
-    if (criteria.sku !== 'ALL' && lead.interestedSku !== criteria.sku) return false;
+    if (!matchesCatalogFilter(lead.interestedSku, lead.interestedProductName)) return false;
+    if (criteria.ownerId !== 'ALL' && !ownerOwnedSkus.has(lead.interestedSku)) return false;
     if (criteria.channel !== 'ALL' && lead.sourceChannel !== criteria.channel) return false;
     if (queryLower) {
       const hay = `${lead.interestedSku} ${lead.interestedProductName} ${lead.fullName}`.toLowerCase();
@@ -1017,7 +1038,8 @@ export function buildBusinessIntelligenceReport(criteria: BiFilterCriteria): BiR
 
   const filteredWaInteractions = waState.interactionsLog.filter((wa) => {
     if (!isDateWithinRange(wa.createdAt, fromMs, toMs)) return false;
-    if (criteria.sku !== 'ALL' && wa.sku !== criteria.sku) return false;
+    if (wa.sku && !matchesCatalogFilter(wa.sku, '')) return false;
+    if (criteria.ownerId !== 'ALL' && (!wa.sku || !ownerOwnedSkus.has(wa.sku))) return false;
     if (criteria.channel !== 'ALL' && criteria.channel !== 'whatsapp') return false;
     return true;
   });
@@ -1047,14 +1069,21 @@ export function buildBusinessIntelligenceReport(criteria: BiFilterCriteria): BiR
       const stlAgg = ownerSettlementAgg.get(st.ownerId) || { paid: 0, approvedPending: 0 };
 
       const adAllocForOwner = adsState.ownerSpendAllocations
-        .filter((a) => a.ownerId === st.ownerId)
+        .filter(
+          (a) =>
+            a.ownerId === st.ownerId &&
+            a.ownerDeductionAuthorized === true &&
+            filteredCampaignIds.has(a.campaignId)
+        )
         .reduce((s, a) => s + a.ownerAllocatedSpendCop, 0);
 
       const grossBeforeComm = ordAgg.netSales - ordAgg.cogs - expAgg.direct - expAgg.shared - adAllocForOwner;
-      const storeCommission =
-        st.agreement.status === 'active'
-          ? Math.round((Math.max(0, ordAgg.netSales) * (st.agreement.storeCommissionPct || 0)) / 100)
-          : null;
+      const commCalc = computeSaleCommissionAndOwnerProfit(
+        ordAgg.netSales,
+        ordAgg.netSales - ordAgg.cogs - adAllocForOwner,
+        st.agreement
+      );
+      const storeCommission = commCalc.storeCommissionCop;
       const attributableProfit = grossBeforeComm - (storeCommission ?? 0);
 
       return {
@@ -1339,11 +1368,16 @@ export function buildBusinessIntelligenceReport(criteria: BiFilterCriteria): BiR
 // ============================================================================
 
 function escapeCsvField(val: unknown): string {
-  const s = String(val ?? '');
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return `"${s.replace(/"/g, '""')}"`;
+  const raw = String(val ?? '');
+  const trimmedStart = raw.replace(/^\s+/, '');
+  const safe =
+    typeof val !== 'number' && /^[=+\-@\t\r]/.test(trimmedStart) && !/^-\d+(\.\d+)?$/.test(trimmedStart)
+      ? `'${raw}`
+      : raw;
+  if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r')) {
+    return `"${safe.replace(/"/g, '""')}"`;
   }
-  return s;
+  return safe;
 }
 
 export function exportBiSnapshotToCsv(snapshot: BiReportSnapshot, scope: 'GENERAL' | 'OWNERS' | 'SKU' | 'UNDERLYING'): string {
@@ -1442,7 +1476,7 @@ export function triggerCsvDownload(csvContent: string, filename: string): void {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function openPrintableBiPdfReport(snapshot: BiReportSnapshot): boolean {
@@ -1453,7 +1487,7 @@ export function openPrintableBiPdfReport(snapshot: BiReportSnapshot): boolean {
     .map(
       (o) => `
       <tr>
-        <td>${o.ownerName} (${o.ownerId})</td>
+        <td>${escapeHtml(o.ownerName)} (${escapeHtml(o.ownerId)})</td>
         <td style="text-align:right">${o.physicalUnits} (${o.availableUnits} disp.)</td>
         <td style="text-align:right">${formatCopSimple(o.netSalesCop)}</td>
         <td style="text-align:right">${formatCopSimple(o.cogsSoldCop)}</td>
@@ -1486,8 +1520,8 @@ export function openPrintableBiPdfReport(snapshot: BiReportSnapshot): boolean {
     <body>
       <h1>REAL TWS — Reporte Ejecutivo de Business Intelligence</h1>
       <div class="meta">
-        Fecha de emisión: ${new Date(snapshot.generatedAt).toLocaleString('es-CO')} |
-        Criterios: ${snapshot.appliedFilterSummary} |
+        Fecha de emisión: ${escapeHtml(new Date(snapshot.generatedAt).toLocaleString('es-CO'))} |
+        Criterios: ${escapeHtml(snapshot.appliedFilterSummary)} |
         Regla: Excluye pedidos no confirmados de ingresos realizados.
       </div>
       <div class="grid">

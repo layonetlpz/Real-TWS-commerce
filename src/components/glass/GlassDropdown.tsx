@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export interface GlassDropdownOption {
@@ -24,6 +24,8 @@ export function GlassDropdown({
 }: GlassDropdownProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +35,10 @@ export function GlassDropdown({
       }
     };
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', handleOutside);
     window.addEventListener('keydown', handleKey);
@@ -42,6 +47,25 @@ export function GlassDropdown({
       window.removeEventListener('keydown', handleKey);
     };
   }, [open]);
+
+  const handleMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const enabled = itemRefs.current.filter((el): el is HTMLButtonElement => Boolean(el && !el.disabled));
+    if (enabled.length === 0) return;
+    const idx = enabled.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      enabled[(idx + 1) % enabled.length]?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      enabled[(idx - 1 + enabled.length) % enabled.length]?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      enabled[0]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      enabled[enabled.length - 1]?.focus();
+    }
+  };
 
   const btnClass =
     variant === 'primary'
@@ -53,6 +77,7 @@ export function GlassDropdown({
   return (
     <div className="rtw-dropdown" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={btnClass}
         aria-haspopup="menu"
@@ -71,10 +96,13 @@ export function GlassDropdown({
       </button>
 
       {open && (
-        <div className="rtw-dropdown-menu" role="menu">
-          {options.map((opt) => (
+        <div className="rtw-dropdown-menu" role="menu" onKeyDown={handleMenuKeyDown}>
+          {options.map((opt, idx) => (
             <button
               key={opt.id}
+              ref={(el) => {
+                itemRefs.current[idx] = el;
+              }}
               type="button"
               role="menuitem"
               disabled={opt.disabled}

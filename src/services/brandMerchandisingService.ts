@@ -133,6 +133,7 @@ export interface RealCatalogMerchItem {
   minimumPriceCop: number | null;
   qtyPhysicalTotal: number;
   qtyAvailableTotal: number;
+  qtyPendingInspectionTotal: number;
   ownerAllocations: Array<{
     ownerId: string;
     ownerName: string;
@@ -140,6 +141,7 @@ export interface RealCatalogMerchItem {
     storageBin: string;
     qtyAvailable: number;
     qtyPhysical: number;
+    qtyPendingInspection: number;
   }>;
 }
 
@@ -510,7 +512,7 @@ export function renderRealTwsLogoSvgMarkup(
   const sloganText = customSlogan ?? 'AUDIO & TECH STORE';
   switch (variant) {
     case 'PRIMARY_HORIZONTAL':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" width="100%" height="100%">
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
         <defs>
           <linearGradient id="rtwGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#F3E5AB"/>
@@ -531,7 +533,7 @@ export function renderRealTwsLogoSvgMarkup(
       </svg>`;
 
     case 'MONOGRAM_BADGE':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="100%" height="100%">
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
         <defs>
           <linearGradient id="rtwGoldBadge" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#F3E5AB"/>
@@ -549,7 +551,7 @@ export function renderRealTwsLogoSvgMarkup(
       </svg>`;
 
     case 'GOLD_ON_CARBON':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" width="100%" height="100%">
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
         <rect width="420" height="110" rx="14" fill="#090A0D" stroke="#D4AF37" stroke-width="3"/>
         <text x="210" y="56" text-anchor="middle" fill="#D4AF37" font-family="Inter, Arial, sans-serif" font-size="38" font-weight="900" letter-spacing="5">REAL TWS</text>
         <line x1="70" y1="68" x2="350" y2="68" stroke="#D4AF37" stroke-width="1.5"/>
@@ -557,7 +559,7 @@ export function renderRealTwsLogoSvgMarkup(
       </svg>`;
 
     case 'CARBON_ON_LIGHT':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" width="100%" height="100%">
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 110" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
         <rect width="420" height="110" rx="14" fill="#F8FAFC" stroke="#0D0E12" stroke-width="2.5"/>
         <rect x="14" y="14" width="82" height="82" rx="12" fill="#0D0E12"/>
         <text x="55" y="64" text-anchor="middle" fill="#D4AF37" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900">RT</text>
@@ -566,7 +568,7 @@ export function renderRealTwsLogoSvgMarkup(
       </svg>`;
 
     case 'MINIMAL_SEAL':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 70" width="100%" height="100%">
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 70" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
         <rect width="260" height="70" rx="8" fill="#0D0E12" stroke="#D4AF37" stroke-width="2"/>
         <text x="130" y="38" text-anchor="middle" fill="#F9FAFB" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="800" letter-spacing="3">REAL <tspan fill="#D4AF37">TWS</tspan></text>
         <text x="130" y="56" text-anchor="middle" fill="#9CA3AF" font-family="JetBrains Mono, monospace" font-size="9.5" letter-spacing="2">VERIFIED CATALOG SKU</text>
@@ -742,6 +744,10 @@ export function getRealCatalogMerchItems(): RealCatalogMerchItem[] {
 
     const qtyPhysicalTotal = matchingAllocs.reduce((s, a) => s + a.qtyPhysical, 0);
     const qtyAvailableTotal = matchingAllocs.reduce((s, a) => s + a.qtyAvailable, 0);
+    const qtyPendingInspectionTotal = matchingAllocs.reduce(
+      (s, a) => s + a.qtyPendingInspection,
+      0
+    );
 
     const currentNormalPriceCop =
       skuPricing?.normalSalePriceCop ?? cat.approvedSalePriceCop ?? null;
@@ -777,13 +783,15 @@ export function getRealCatalogMerchItems(): RealCatalogMerchItem[] {
       minimumPriceCop,
       qtyPhysicalTotal,
       qtyAvailableTotal,
+      qtyPendingInspectionTotal,
       ownerAllocations: matchingAllocs.map((a) => ({
         ownerId: a.ownerId,
         ownerName: a.ownerName,
         lotId: a.lotId,
         storageBin: a.storageBin || 'BODEGA-CENTRAL',
         qtyAvailable: a.qtyAvailable,
-        qtyPhysical: a.qtyPhysical
+        qtyPhysical: a.qtyPhysical,
+        qtyPendingInspection: a.qtyPendingInspection
       }))
     };
   });
@@ -817,6 +825,9 @@ export function saveMerchandisingAssetVersion(
       : primaryItem.currentNormalPriceCop;
 
   if (input.existingAssetId) {
+    if (!input.changeNote || !input.changeNote.trim()) {
+      throw new Error('Debe describir el motivo o cambio para guardar una nueva versión (v2+).');
+    }
     const existing = state.savedAssets.find((a) => a.id === input.existingAssetId);
     if (!existing) {
       throw new Error(`Pieza ${input.existingAssetId} no encontrada.`);
@@ -925,7 +936,7 @@ export function renderMerchandisingPieceSvg(
   if (config.format === 'sku_label') {
     // Etiqueta Térmica de SKU 50x25mm (600x300 viewBox)
     const barcodeSvg = renderSkuBarcodePatternSvg(primary.sku, 45, 130, 510, 95, '#0D0E12');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="600" height="300" rx="12" fill="#FFFFFF" stroke="#0D0E12" stroke-width="4"/>
       <rect x="0" y="0" width="600" height="54" fill="#0D0E12"/>
       <text x="24" y="35" fill="#D4AF37" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="900" letter-spacing="2">REAL TWS</text>
@@ -940,7 +951,7 @@ export function renderMerchandisingPieceSvg(
 
   if (config.format === 'price_label') {
     // Etiqueta de Precio de Vitrina 55x35mm (660x420 viewBox)
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 420" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 420" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="660" height="420" rx="16" fill="${bgPrimary}" stroke="${accentGold}" stroke-width="5"/>
       <rect x="20" y="20" width="620" height="64" rx="10" fill="#151821" stroke="${accentGold}" stroke-width="1.5"/>
       <text x="44" y="60" fill="${accentGold}" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" letter-spacing="3">REAL TWS</text>
@@ -963,12 +974,13 @@ export function renderMerchandisingPieceSvg(
           a.lotId === config.selectedLotIdForInternalTag
       ) ||
       primary.ownerAllocations[0] || {
-        ownerId: 'OWN-0001',
-        ownerName: 'Eberto',
+        ownerId: config.selectedOwnerIdForInternalTag || 'SIN-PROPIETARIO',
+        ownerName: config.selectedOwnerIdForInternalTag || 'Sin propietario asignado',
         lotId: `LOT-INI-2026-01-${primary.sku}`,
         storageBin: 'BODEGA-CENTRAL',
         qtyAvailable: primary.qtyAvailableTotal,
-        qtyPhysical: primary.qtyPhysicalTotal
+        qtyPhysical: primary.qtyPhysicalTotal,
+        qtyPendingInspection: primary.qtyPendingInspectionTotal
       };
 
     const barcodeSvg = renderSkuBarcodePatternSvg(
@@ -980,7 +992,7 @@ export function renderMerchandisingPieceSvg(
       '#0D0E12'
     );
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="720" height="420" rx="14" fill="#FFFFFF" stroke="#0D0E12" stroke-width="5"/>
       <rect x="0" y="0" width="720" height="66" fill="#0D0E12"/>
       <text x="28" y="42" fill="#D4AF37" font-family="JetBrains Mono, monospace" font-size="22" font-weight="800">CONTROL INTERNO BODEGA — REAL TWS</text>
@@ -1000,7 +1012,7 @@ export function renderMerchandisingPieceSvg(
 
   if (config.format === 'thank_you_card') {
     // Tarjeta de Agradecimiento 90x55mm (900x550 viewBox)
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 550" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 550" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="900" height="550" rx="22" fill="#0D0E12" stroke="#D4AF37" stroke-width="6"/>
       <rect x="28" y="28" width="844" height="494" rx="14" fill="none" stroke="#D4AF37" stroke-width="1.5" stroke-dasharray="8 6"/>
       <text x="450" y="120" text-anchor="middle" fill="#D4AF37" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="900" letter-spacing="6">REAL TWS</text>
@@ -1017,7 +1029,7 @@ export function renderMerchandisingPieceSvg(
 
   if (config.format === 'brand_sticker') {
     // Sticker Circular / Sello de Seguridad 600x600
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="600" height="600" rx="300" fill="#0D0E12" stroke="#D4AF37" stroke-width="14"/>
       <circle cx="300" cy="300" r="262" fill="none" stroke="#F3E5AB" stroke-width="3" stroke-dasharray="12 8"/>
       <path d="M210 230 C210 140, 390 140, 390 230" fill="none" stroke="#D4AF37" stroke-width="16" stroke-linecap="round"/>
@@ -1032,7 +1044,7 @@ export function renderMerchandisingPieceSvg(
 
   if (config.format === 'packaging_template') {
     // Fajilla / Plantilla de Empaque 960x390
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 390" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 390" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="960" height="390" rx="18" fill="#0D0E12" stroke="#D4AF37" stroke-width="5"/>
       <rect x="0" y="0" width="290" height="390" fill="#151821"/>
       <text x="145" y="110" text-anchor="middle" fill="#D4AF37" font-family="Inter, Arial, sans-serif" font-size="36" font-weight="900" letter-spacing="3">REAL TWS</text>
@@ -1059,7 +1071,7 @@ export function renderMerchandisingPieceSvg(
         ? formatCOP(secondary.currentNormalPriceCop)
         : 'EN REVISIÓN';
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="1200" height="900" rx="24" fill="${bgPrimary}" stroke="${accentGold}" stroke-width="5"/>
       <rect x="0" y="0" width="1200" height="120" fill="#151821"/>
       <text x="50" y="65" fill="${accentGold}" font-family="Inter, Arial, sans-serif" font-size="36" font-weight="900" letter-spacing="4">REAL TWS</text>
@@ -1128,7 +1140,7 @@ export function renderMerchandisingPieceSvg(
       })
       .join('');
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350" width="100%" height="100%">
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
       <rect width="1080" height="1350" rx="26" fill="${bgPrimary}" stroke="${accentGold}" stroke-width="6"/>
       <rect x="0" y="0" width="1080" height="205" fill="#151821"/>
       <text x="60" y="88" fill="${accentGold}" font-family="Inter, Arial, sans-serif" font-size="48" font-weight="900" letter-spacing="5">REAL TWS</text>
@@ -1141,7 +1153,7 @@ export function renderMerchandisingPieceSvg(
   }
 
   // --- FORMATO POR DEFECTO PARA FICHAS DE PRODUCTO, TARJETAS, BANNERS, PORTADAS, STORIES Y HOJA A4 ---
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="100%" height="100%">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
     <defs>
       <linearGradient id="rtwPieceGold" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#F3E5AB"/>
@@ -1198,7 +1210,7 @@ export function exportSvgMarkupToSvgFile(svgMarkup: string, filename: string): v
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function exportSvgMarkupToPngFile(
@@ -1207,8 +1219,12 @@ export async function exportSvgMarkupToPngFile(
   widthPx = 1200,
   heightPx = 1200
 ): Promise<void> {
+  const preparedSvg = svgMarkup.replace(
+    /^<svg\b([^>]*)>/,
+    (_m, attrs: string) => `<svg width="${widthPx}" height="${heightPx}"${attrs.replace(/\sstyle="[^"]*"/g, '')}>`
+  );
   return new Promise((resolve, reject) => {
-    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    const svgBlob = new Blob([preparedSvg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
 
@@ -1240,7 +1256,7 @@ export async function exportSvgMarkupToPngFile(
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          URL.revokeObjectURL(pngUrl);
+          setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
           resolve();
         }, 'image/png');
       } catch (err) {

@@ -35,8 +35,10 @@
 import { getRealCatalogMerchItems } from './brandMerchandisingService';
 import { getCreativeStudioState } from './creativeStudioService';
 import { getFinancialAccountingState } from './financialAccountingService';
+import { getInventoryPurchaseState } from './inventoryPurchaseService';
 import { getSalesOrdersCrmState } from './salesOrdersCrmService';
 import { formatCOP } from '../utils/formatters';
+import { parseCsvRecords } from '../utils/spreadsheetParser';
 
 export type AdsDataSourceOrigin =
   | 'MANUAL_ENTRY'
@@ -149,6 +151,7 @@ export interface MetaAdsMetricRecord {
   spendCop: number;
   attributedRevenueCop: number;
   attributedCogsCop: number;
+  cogsStatus?: 'VERIFIED_LOT_COST' | 'MANUAL_INPUT' | 'PENDING_COST';
   linkedOrderNumbers: string[];
   linkedLeadCodes: string[];
   dataSourceOrigin: AdsDataSourceOrigin;
@@ -222,6 +225,7 @@ export interface CampaignPerformanceSummary {
   roasMultiplier: number | null;
   netContributionAfterAdsCop: number;
   netProfitabilityPct: number | null;
+  hasPendingCogs: boolean;
   linkedOrderNumbers: string[];
   linkedLeadCodes: string[];
 }
@@ -311,6 +315,10 @@ export function saveMetaAdsControlState(state: MetaAdsControlStoreState): void {
   }
 }
 
+function getBogotaDateString(date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(date);
+}
+
 export function getDataSourceBadgeLabel(origin: AdsDataSourceOrigin): string {
   if (origin === 'MANUAL_ENTRY') return 'Dato Manual';
   if (origin === 'CSV_ADS_MANAGER_IMPORT') return 'Importado CSV Ads Manager';
@@ -346,8 +354,15 @@ export function registerManualMetaAdsCampaignBundle(input: {
   if (!input.campaignName.trim()) {
     throw new Error('El nombre de la campaña es obligatorio.');
   }
-  if (input.manualBudgetCapCop <= 0) {
-    throw new Error('Debe definir un tope de presupuesto manual mayor a $0 COP.');
+  if (!Number.isFinite(input.manualBudgetCapCop) || input.manualBudgetCapCop <= 0) {
+    throw new Error('Debe definir un tope de presupuesto manual finito y mayor a $0 COP.');
+  }
+  if (input.targetCpaCop !== undefined && (!Number.isFinite(input.targetCpaCop) || input.targetCpaCop <= 0)) {
+    throw new Error('El CPA objetivo debe ser mayor a $0 COP.');
+  }
+  const cleanOwnerId = input.targetOwnerId.trim();
+  if (!cleanOwnerId) {
+    throw new Error('Debe indicar el propietario objetivo de la campaña.');
   }
 
   const catalogItems = getRealCatalogMerchItems();
@@ -356,14 +371,17 @@ export function registerManualMetaAdsCampaignBundle(input: {
     throw new Error(`SKU ${input.promotedSku} no encontrado en el catálogo maestro.`);
   }
 
-  const ownerAlloc = catItem.ownerAllocations.find(
-    (a) => a.ownerId === input.targetOwnerId
-  );
-  const ownerName = ownerAlloc?.ownerName || 'Eberto';
+  const invState = getInventoryPurchaseState();
+  const ownerAlloc = catItem.ownerAllocations.find((a) => a.ownerId === cleanOwnerId);
+  const masterOwner = invState.owners.find((o) => o.id === cleanOwnerId);
+  if (!ownerAlloc && !masterOwner) {
+    throw new Error(`Propietario objetivo "${cleanOwnerId}" no encontrado en el catálogo de propietarios.`);
+  }
+  const ownerName = ownerAlloc?.ownerName || masterOwner?.fullName || cleanOwnerId;
 
   const creativeState = getCreativeStudioState();
   const matchingProject = creativeState.projects.find(
-    (p) => p.sku === input.promotedSku && p.ownerId === input.targetOwnerId
+    (p) => p.sku === input.promotedSku && p.ownerId === cleanOwnerId
   );
 
   const state = getMetaAdsControlState();
@@ -382,7 +400,7 @@ export function registerManualMetaAdsCampaignBundle(input: {
     objective: input.objective.trim() || 'Conversaciones y Ventas Verificadas',
     promotedSku: catItem.sku,
     promotedProductName: catItem.productName,
-    targetOwnerId: input.targetOwnerId,
+    targetOwnerId: cleanOwnerId,
     targetOwnerName: ownerName,
     ownerAllocationPolicy: input.ownerAllocationPolicy,
     manualBudgetCapCop: Math.round(input.manualBudgetCapCop),
@@ -397,7 +415,7 @@ export function registerManualMetaAdsCampaignBundle(input: {
     ownerDeductionAuthorized: false, // Nunca descontar al propietario sin autorización explícita
     ownerDeductionAuthorizedBy: null,
     ownerDeductionAuthorizedAt: null,
-    startDate: nowIso.slice(0, 10),
+    startDate: getBogotaDateString(),
     endDate: null,
     createdAt: nowIso,
     updatedAt: nowIso
@@ -517,13 +535,31 @@ export function recordManualOrSyncedCampaignMetrics(input: {
   actorName: string;
 }): MetaAdsMetricRecord {
   const state = getMetaAdsControlState();
+  if (input.dataSourceOrigin === 'META_API_SYNCED' && !state.futureApiAdapter.isEnabled) {
+    throw new Error(
+      'La sincronización automática con Meta Marketing API está desactivada; registre métricas como Dato Manual o mediante importación CSV de Ads Manager.'
+    );
+  }
   const cmp = state.campaigns.find((c) => c.id === input.campaignId);
   if (!cmp) {
     throw new Error('Seleccione una campaña válida para registrar métricas.');
   }
 
+  const numericChecks = [
+    input.impressions,
+    input.reach,
+    input.clicks,
+    input.whatsappConversationsCount,
+    input.verifiedPurchasesOrdersCount,
+    input.spendCop
+  ];
+  if (numericChecks.some((v) => !Number.isFinite(v) || v < 0)) {
+    throw new Error('Las métricas (impresiones, alcance, clics, conversaciones, compras y gasto) deben ser números finitos iguales o mayores a 0.');
+  }
+
   // Buscar ventas y costos reales del SKU si se indiquen compras verificadas
   const crmState = getSalesOrdersCrmState();
+  const invState = getInventoryPurchaseState();
   const matchingOrders = crmState.orders.filter(
     (o) =>
       o.status !== 'cancelled' &&
@@ -545,15 +581,43 @@ export function recordManualOrSyncedCampaignMetrics(input: {
     purchases === 0
       ? 0
       : input.attributedRevenueCop !== undefined
-        ? Math.max(0, input.attributedRevenueCop)
+        ? Math.max(0, Math.round(input.attributedRevenueCop))
         : purchases * unitPrice;
 
-  const cogsCop =
-    purchases === 0
-      ? 0
-      : input.attributedCogsCop !== undefined
-        ? Math.max(0, input.attributedCogsCop)
-        : Math.round(revenueCop * 0.45);
+  let cogsCop = 0;
+  let cogsStatus: MetaAdsMetricRecord['cogsStatus'] = 'VERIFIED_LOT_COST';
+  if (purchases > 0) {
+    if (input.attributedCogsCop !== undefined) {
+      if (!Number.isFinite(input.attributedCogsCop) || input.attributedCogsCop < 0) {
+        throw new Error('El COGS manual atribuido debe ser finito >= 0.');
+      }
+      cogsCop = Math.round(input.attributedCogsCop);
+      cogsStatus = 'MANUAL_INPUT';
+    } else {
+      const matchingLotWithCost =
+        invState.allocations.find(
+          (a) =>
+            a.sku === cmp.promotedSku &&
+            a.ownerId === cmp.targetOwnerId &&
+            a.effectiveUnitCostCop !== null &&
+            a.qtyPhysical > 0
+        ) ||
+        invState.allocations.find(
+          (a) =>
+            a.sku === cmp.promotedSku &&
+            a.ownerId === cmp.targetOwnerId &&
+            a.effectiveUnitCostCop !== null
+        );
+      if (matchingLotWithCost && matchingLotWithCost.effectiveUnitCostCop !== null) {
+        cogsCop = Math.round(matchingLotWithCost.effectiveUnitCostCop * purchases);
+        cogsStatus = 'VERIFIED_LOT_COST';
+      } else {
+        // Nunca fabricar un 45% estimado cuando falta el costo real del lote
+        cogsCop = 0;
+        cogsStatus = 'PENDING_COST';
+      }
+    }
+  }
 
   const nowIso = new Date().toISOString();
   const metric: MetaAdsMetricRecord = {
@@ -562,7 +626,7 @@ export function recordManualOrSyncedCampaignMetrics(input: {
     campaignCode: cmp.campaignCode,
     adSetId: state.adSets.find((s) => s.campaignId === cmp.id)?.id || null,
     adId: state.adsAndCreatives.find((a) => a.campaignId === cmp.id)?.id || null,
-    metricDate: input.metricDate || nowIso.slice(0, 10),
+    metricDate: input.metricDate || getBogotaDateString(),
     sku: cmp.promotedSku,
     ownerId: cmp.targetOwnerId,
     channel: cmp.channel,
@@ -574,6 +638,7 @@ export function recordManualOrSyncedCampaignMetrics(input: {
     spendCop: Math.max(0, Math.round(input.spendCop || 0)),
     attributedRevenueCop: revenueCop,
     attributedCogsCop: cogsCop,
+    cogsStatus,
     linkedOrderNumbers:
       input.linkedOrderNumbers ||
       matchingOrders.slice(0, purchases).map((o) => o.orderNumber),
@@ -587,12 +652,12 @@ export function recordManualOrSyncedCampaignMetrics(input: {
 
   state.metrics.unshift(metric);
   state.historyLog.unshift({
-    id: `ADSHIST-${Date.now()}`,
+    id: `ADSHIST-${Date.now()}-${state.historyLog.length + 1}`,
     timestamp: nowIso,
     actor: input.actorName,
     action: 'METRICS_RECORDED',
     dataSource: input.dataSourceOrigin,
-    detail: `[${getDataSourceBadgeLabel(input.dataSourceOrigin)}] ${cmp.campaignCode} (${metric.metricDate}): Gasto ${formatCOP(metric.spendCop)} | Conversaciones: ${conversations} | Compras Reales: ${purchases} | Ingresos: ${formatCOP(revenueCop)}.`
+    detail: `[${getDataSourceBadgeLabel(input.dataSourceOrigin)}] ${cmp.campaignCode} (${metric.metricDate}): Gasto ${formatCOP(metric.spendCop)} | Conversaciones: ${conversations} | Compras Reales: ${purchases} | Ingresos: ${formatCOP(revenueCop)}${cogsStatus === 'PENDING_COST' ? ' (COGS pendiente de lote)' : ''}.`
   });
 
   saveMetaAdsControlState(state);
@@ -604,71 +669,159 @@ export function importAdsManagerCsvReport(input: {
   defaultOwnerId: string;
   actorName: string;
 }): { importedCampaignsCount: number; importedMetricsCount: number } {
-  const lines = input.csvContent
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  if (lines.length < 2) {
+  const rows = parseCsvRecords(input.csvContent);
+  if (rows.length < 2) {
     throw new Error(
       'El archivo CSV de Ads Manager debe incluir una fila de encabezados y al menos una fila de datos.'
     );
   }
 
   const catalogItems = getRealCatalogMerchItems();
-  const state = getMetaAdsControlState();
-  let importedCampaignsCount = 0;
-  let importedMetricsCount = 0;
+  const invState = getInventoryPurchaseState();
+  const validOwnerIds = new Set(invState.owners.map((o) => o.id));
+  const cleanDefaultOwner = input.defaultOwnerId.trim();
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
-    if (cols.length < 7) continue;
+  const headerNorm = rows[0].map((h) => h.trim().toLowerCase());
+  const colIdx = {
+    campaignName: headerNorm.findIndex((h) => h.includes('campaign') || h.includes('campaña')),
+    sku: headerNorm.findIndex((h) => h === 'sku' || h.includes('sku')),
+    ownerId: headerNorm.findIndex((h) => h.includes('owner') || h.includes('propietario')),
+    channel: headerNorm.findIndex((h) => h.includes('channel') || h.includes('canal')),
+    date: headerNorm.findIndex((h) => h === 'date' || h.includes('fecha')),
+    impressions: headerNorm.findIndex((h) => h.includes('impres')),
+    clicks: headerNorm.findIndex((h) => h.includes('click') || h.includes('clic')),
+    conversations: headerNorm.findIndex((h) => h.includes('conver')),
+    purchases: headerNorm.findIndex((h) => h.includes('purch') || h.includes('compra')),
+    spend: headerNorm.findIndex((h) => h.includes('spend') || h.includes('gasto')),
+    revenue: headerNorm.findIndex((h) => h.includes('reven') || h.includes('ingreso'))
+  };
 
-    // Formato esperado CSV: CampaignName,SKU,OwnerId,Channel,Date,Impressions,Clicks,Conversations,Purchases,SpendCOP,RevenueCOP
-    const [
-      campaignName,
-      rawSku,
-      rawOwnerId,
-      rawChannel,
-      metricDate,
-      impressionsStr,
-      clicksStr,
-      conversationsStr,
-      purchasesStr,
-      spendStr,
-      revenueStr
-    ] = cols;
+  interface ParsedCsvAdsRow {
+    campaignName: string;
+    matchedItem: (typeof catalogItems)[number];
+    ownerId: string;
+    channel: AdsChannelType;
+    metricDate: string;
+    impressions: number;
+    clicks: number;
+    conversations: number;
+    purchases: number;
+    spendCop: number;
+    revenueCop?: number;
+  }
 
-    const matchedItem =
-      catalogItems.find((it) => it.sku.toUpperCase() === (rawSku || '').toUpperCase()) ||
-      catalogItems[0];
-    if (!matchedItem) continue;
+  const parsedRows: ParsedCsvAdsRow[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const cols = rows[i].map((c) => c.trim());
+    if (cols.every((c) => !c)) continue;
+    if (cols.length < 7) {
+      throw new Error(`Fila ${i + 1} del CSV tiene menos de 7 columnas.`);
+    }
 
-    const ownerId = rawOwnerId && rawOwnerId.startsWith('OWN-') ? rawOwnerId : input.defaultOwnerId;
+    const pick = (mappedIdx: number, fallbackIdx: number) =>
+      cols[mappedIdx >= 0 ? mappedIdx : fallbackIdx] ?? '';
+
+    const campaignName = pick(colIdx.campaignName, 0);
+    const rawSku = pick(colIdx.sku, 1);
+    const rawOwnerId = pick(colIdx.ownerId, 2);
+    const rawChannel = pick(colIdx.channel, 3).toLowerCase();
+    const metricDate = pick(colIdx.date, 4) || getBogotaDateString();
+    const impressions = Number(pick(colIdx.impressions, 5) || 0);
+    const clicks = Number(pick(colIdx.clicks, 6) || 0);
+    const conversations = Number(pick(colIdx.conversations, 7) || 0);
+    const purchases = Number(pick(colIdx.purchases, 8) || 0);
+    const spendCop = Number(pick(colIdx.spend, 9) || 0);
+    const rawRevenueStr = pick(colIdx.revenue, 10);
+
+    const matchedItem = catalogItems.find(
+      (it) => it.sku.toUpperCase() === rawSku.toUpperCase()
+    );
+    if (!matchedItem) {
+      throw new Error(
+        `Fila ${i + 1} del CSV referencia SKU "${rawSku}" que no existe en el catálogo maestro.`
+      );
+    }
+
+    const ownerId =
+      rawOwnerId && validOwnerIds.has(rawOwnerId)
+        ? rawOwnerId
+        : cleanDefaultOwner && validOwnerIds.has(cleanDefaultOwner)
+          ? cleanDefaultOwner
+          : matchedItem.ownerAllocations[0]?.ownerId || '';
+    if (!ownerId) {
+      throw new Error(
+        `Fila ${i + 1} (${matchedItem.sku}) no tiene propietario válido ni propietario por defecto.`
+      );
+    }
+
+    if (
+      [impressions, clicks, conversations, purchases, spendCop].some(
+        (n) => !Number.isFinite(n) || n < 0
+      )
+    ) {
+      throw new Error(`Fila ${i + 1} contiene métricas numéricas inválidas o negativas.`);
+    }
+
+    let revenueCop: number | undefined = undefined;
+    if (purchases > 0 && rawRevenueStr !== '') {
+      const parsedRev = Number(rawRevenueStr);
+      if (!Number.isFinite(parsedRev) || parsedRev < 0) {
+        throw new Error(`Fila ${i + 1} contiene ingreso atribuido inválido.`);
+      }
+      revenueCop = Math.round(parsedRev);
+    } else if (purchases === 0) {
+      revenueCop = 0;
+    }
+
     const channel: AdsChannelType =
       rawChannel === 'instagram' || rawChannel === 'facebook' || rawChannel === 'marketplace'
         ? rawChannel
         : 'whatsapp';
 
+    parsedRows.push({
+      campaignName,
+      matchedItem,
+      ownerId,
+      channel,
+      metricDate,
+      impressions,
+      clicks,
+      conversations,
+      purchases,
+      spendCop,
+      revenueCop
+    });
+  }
+
+  if (parsedRows.length === 0) {
+    throw new Error('No se encontraron filas válidas de datos en el CSV.');
+  }
+
+  const state = getMetaAdsControlState();
+  let importedCampaignsCount = 0;
+  let importedMetricsCount = 0;
+
+  for (const row of parsedRows) {
     let existingCmp = state.campaigns.find(
       (c) =>
-        c.campaignName.toLowerCase() === campaignName.toLowerCase() &&
-        c.promotedSku === matchedItem.sku
+        c.campaignName.toLowerCase() === row.campaignName.toLowerCase() &&
+        c.promotedSku === row.matchedItem.sku &&
+        c.targetOwnerId === row.ownerId
     );
 
     if (!existingCmp) {
       const created = registerManualMetaAdsCampaignBundle({
-        campaignName: campaignName || `Campaña CSV ${matchedItem.sku}`,
-        channel,
+        campaignName: row.campaignName || `Campaña CSV ${row.matchedItem.sku}`,
+        channel: row.channel,
         objective: 'Importado desde Informe CSV Ads Manager',
-        promotedSku: matchedItem.sku,
-        targetOwnerId: ownerId,
+        promotedSku: row.matchedItem.sku,
+        targetOwnerId: row.ownerId,
         ownerAllocationPolicy: 'direct_owner',
-        manualBudgetCapCop: Math.max(50000, (Number(spendStr) || 20000) * 2),
+        manualBudgetCapCop: Math.max(50000, Math.round(row.spendCop * 2)),
         targetCpaCop: 15000,
-        adSetName: `Conjunto CSV ${matchedItem.sku}`,
+        adSetName: `Conjunto CSV ${row.matchedItem.sku}`,
         audienceSummary: 'Audiencia Informe CSV Ads Manager',
-        adName: `Anuncio CSV ${matchedItem.sku}`,
+        adName: `Anuncio CSV ${row.matchedItem.sku}`,
         creativeFormat: '1:1',
         actorName: input.actorName
       });
@@ -679,44 +832,39 @@ export function importAdsManagerCsvReport(input: {
       importedCampaignsCount += 1;
     }
 
-    const impressions = Number(impressionsStr) || 0;
-    const clicks = Number(clicksStr) || 0;
-    const conversations = Number(conversationsStr) || 0;
-    const purchases = Number(purchasesStr) || 0;
-    const spendCop = Number(spendStr) || 0;
-    const revenueCop =
-      purchases > 0
-        ? Number(revenueStr) || purchases * (matchedItem.currentNormalPriceCop || 0)
-        : 0;
-
     recordManualOrSyncedCampaignMetrics({
       campaignId: existingCmp.id,
-      metricDate: metricDate || new Date().toISOString().slice(0, 10),
-      impressions,
-      reach: Math.round(impressions * 0.82),
-      clicks,
-      whatsappConversationsCount: conversations,
-      verifiedPurchasesOrdersCount: purchases,
-      spendCop,
-      attributedRevenueCop: revenueCop,
+      metricDate: row.metricDate,
+      impressions: row.impressions,
+      reach: Math.round(row.impressions * 0.82),
+      clicks: row.clicks,
+      whatsappConversationsCount: row.conversations,
+      verifiedPurchasesOrdersCount: row.purchases,
+      spendCop: row.spendCop,
+      attributedRevenueCop: row.revenueCop,
       dataSourceOrigin: 'CSV_ADS_MANAGER_IMPORT',
       actorName: input.actorName
     });
     importedMetricsCount += 1;
   }
 
-  saveMetaAdsControlState(state);
+  saveMetaAdsControlState(getMetaAdsControlState());
   return { importedCampaignsCount, importedMetricsCount };
 }
 
 export function generateSampleAdsManagerCsvContent(): string {
   const catalogItems = getRealCatalogMerchItems();
-  const sku1 = catalogItems[0]?.sku || 'COM-PER-001-AZU';
-  const sku2 = catalogItems[1]?.sku || 'HOG-ACC-001-NEG';
+  const invState = getInventoryPurchaseState();
+  const sku1 = catalogItems[0]?.sku || 'SKU-EJEMPLO-001';
+  const sku2 = catalogItems[1]?.sku || sku1;
+  const owner1 =
+    catalogItems[0]?.ownerAllocations[0]?.ownerId || invState.owners[0]?.id || 'OWN-0001';
+  const owner2 = catalogItems[1]?.ownerAllocations[0]?.ownerId || owner1;
+  const today = getBogotaDateString();
   return [
     'CampaignName,SKU,OwnerId,Channel,Date,Impressions,Clicks,Conversations,Purchases,SpendCOP,RevenueCOP',
-    `"Campaña WhatsApp ${sku1}",${sku1},OWN-0001,whatsapp,2026-11-14,4200,145,18,2,18000,100000`,
-    `"Campaña Instagram ${sku2}",${sku2},OWN-0001,instagram,2026-11-14,3100,88,9,0,14000,0`
+    `"Campaña WhatsApp ${sku1}",${sku1},${owner1},whatsapp,${today},4200,145,18,2,18000,100000`,
+    `"Campaña Instagram ${sku2}",${sku2},${owner2},instagram,${today},3100,88,9,0,14000,0`
   ].join('\n');
 }
 
@@ -892,6 +1040,9 @@ export function calculateAllCampaignPerformances(): CampaignPerformanceSummary[]
     const linkedLeadCodes = Array.from(
       new Set(rows.flatMap((r) => r.linkedLeadCodes))
     );
+    const hasPendingCogs = rows.some(
+      (r) => r.verifiedPurchasesOrdersCount > 0 && r.cogsStatus === 'PENDING_COST'
+    );
 
     return {
       campaign,
@@ -914,6 +1065,7 @@ export function calculateAllCampaignPerformances(): CampaignPerformanceSummary[]
       roasMultiplier,
       netContributionAfterAdsCop,
       netProfitabilityPct,
+      hasPendingCogs,
       linkedOrderNumbers,
       linkedLeadCodes
     };
@@ -941,9 +1093,7 @@ export function evaluateMetaAdsSmartAlerts(): SmartAdsAlertItem[] {
     const ownerAlloc = catItem?.ownerAllocations.find(
       (a) => a.ownerId === cmp.targetOwnerId
     );
-    const availableStock = ownerAlloc
-      ? ownerAlloc.qtyAvailable
-      : catItem?.qtyAvailableTotal ?? 0;
+    const availableStock = ownerAlloc ? ownerAlloc.qtyAvailable : 0;
 
     // 1. Alerta: Presupuesto agotado
     if (perf.totalSpendCop >= cmp.manualBudgetCapCop && cmp.manualBudgetCapCop > 0) {
@@ -1040,6 +1190,7 @@ export function evaluateMetaAdsSmartAlerts(): SmartAdsAlertItem[] {
 
     // 6. Alerta: Resultado rentable que merece evaluación
     if (
+      !perf.hasPendingCogs &&
       perf.roasMultiplier !== null &&
       perf.roasMultiplier >= 2.5 &&
       perf.netContributionAfterAdsCop > 0 &&

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 interface GlassDrawerProps {
@@ -20,13 +20,24 @@ export function GlassDrawer({
   footer,
   width = 520
 }: GlassDrawerProps) {
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeBtnRef.current?.focus();
+
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = prevOverflow;
+      prevFocus?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -55,6 +66,7 @@ export function GlassDrawer({
           </div>
 
           <button
+            ref={closeBtnRef}
             type="button"
             className="rtw-btn rtw-btn-outline btn-sm"
             onClick={onClose}

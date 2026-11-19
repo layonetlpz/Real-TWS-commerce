@@ -28,14 +28,21 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   } = useAuth();
   const { selectedOwnerScope, setSelectedOwnerScope } = useOwnerScope();
 
+  const effectiveLinkedOwnerId =
+    activeEffectiveRole === 'OWNER'
+      ? (userProfile?.linkedOwnerId ??
+          (canInspectRoles && selectedOwnerScope !== 'ALL' ? selectedOwnerScope : null))
+      : userProfile?.linkedOwnerId ?? null;
+
   const evaluatedProfile = userProfile
     ? {
         ...userProfile,
         role: activeEffectiveRole,
-        linkedOwnerId:
-          activeEffectiveRole === 'OWNER'
-            ? userProfile.linkedOwnerId
-            : userProfile.linkedOwnerId
+        linkedOwnerId: effectiveLinkedOwnerId,
+        ownerPortalEnabled:
+          activeEffectiveRole === 'OWNER' && canInspectRoles && Boolean(effectiveLinkedOwnerId)
+            ? true
+            : userProfile.ownerPortalEnabled
       }
     : null;
 
@@ -94,10 +101,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return (
       <div
         className="rtw-card rtw-glass-elevated rtw-card-gold-top"
-        style={{ maxWidth: 520, width: '100%', margin: '0 auto', background: 'rgba(255, 255, 255, 0.92)' }}
+        style={{ maxWidth: 520, width: '100%', margin: '0 auto', background: 'var(--glass-bg-elevated)' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-          <AlertTriangle size={22} color="#b8901d" />
+          <AlertTriangle size={22} color="var(--rtw-gold-ink)" />
           <div>
             <span className="rtw-badge rtw-badge-warning">Configuración requerida</span>
             <h1 style={{ fontSize: '1.12rem', fontWeight: 800, color: 'var(--rtw-text-primary)', marginTop: '4px' }}>
@@ -112,7 +119,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
         <div
           style={{
-            backgroundColor: 'rgba(248, 250, 252, 0.85)',
+            backgroundColor: 'var(--rtw-bg-subtle)',
             border: '1px solid var(--rtw-border-light)',
             borderRadius: '10px',
             padding: '12px 14px',
@@ -139,12 +146,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return (
       <div className="rtw-card rtw-card-gold-top" style={{ maxWidth: 620, margin: '36px auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-          <KeyRound size={24} color="#991b1b" />
-          <h2 style={{ fontSize: '1.12rem', fontWeight: 800, color: '#991b1b' }}>
+          <KeyRound size={24} color="var(--rtw-danger-text)" />
+          <h2 style={{ fontSize: '1.12rem', fontWeight: 800, color: 'var(--rtw-danger-text)' }}>
             Sesión expirada — Inicia sesión nuevamente
           </h2>
         </div>
-        <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '16px' }}>
+        <p style={{ fontSize: '0.88rem', color: 'var(--rtw-text-secondary)', marginBottom: '16px' }}>
           Tu sesión ha vencido por seguridad. Reautentícate para continuar operando el sistema comercial.
         </p>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -178,16 +185,20 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  if (evaluatedProfile.role === 'OWNER' && !evaluatedProfile.linkedOwnerId) {
+  if (
+    evaluatedProfile.role === 'OWNER' &&
+    !evaluatedProfile.linkedOwnerId &&
+    location.pathname !== '/gestion/usuarios'
+  ) {
     return (
-      <div className="rtw-card" style={{ borderTop: '4px solid #991b1b', maxWidth: 640, margin: '28px auto' }}>
+      <div className="rtw-card" style={{ borderTop: '4px solid var(--rtw-danger-text)', maxWidth: 640, margin: '28px auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-          <ShieldAlert size={22} color="#991b1b" />
-          <h2 style={{ fontSize: '1.08rem', fontWeight: 800, color: '#111827' }}>
+          <ShieldAlert size={22} color="var(--rtw-danger-text)" />
+          <h2 style={{ fontSize: '1.08rem', fontWeight: 800, color: 'var(--rtw-text-primary)' }}>
             Cuenta de Propietario sin código asignado
           </h2>
         </div>
-        <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '16px' }}>
+        <p style={{ fontSize: '0.88rem', color: 'var(--rtw-text-secondary)', marginBottom: '16px' }}>
           Tu usuario tiene rol de Propietario pero aún no cuenta con un código de propietario asignado en tu perfil. Solicita al administrador vincular tu cuenta.
         </p>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -203,6 +214,13 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           <button
             type="button"
             className="rtw-btn rtw-btn-outline"
+            onClick={() => navigate('/gestion/usuarios')}
+          >
+            Ver mi perfil
+          </button>
+          <button
+            type="button"
+            className="rtw-btn rtw-btn-outline"
             onClick={() => void signOut()}
           >
             Cerrar sesión
@@ -214,30 +232,31 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!accessEval.allowed) {
     const roleMeta = ROLES_CATALOG[evaluatedProfile.role];
+    const canAccessDashboard = evaluateRouteAccess(evaluatedProfile, '/', false).allowed;
     return (
-      <div className="rtw-card" style={{ borderTop: '4px solid #991b1b', maxWidth: 720, margin: '24px auto' }}>
+      <div className="rtw-card" style={{ borderTop: '4px solid var(--rtw-danger-text)', maxWidth: 720, margin: '24px auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-          <ShieldAlert size={24} color="#991b1b" />
+          <ShieldAlert size={24} color="var(--rtw-danger-text)" />
           <div>
             <span className="rtw-badge rtw-badge-danger">Acceso restringido</span>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827', marginTop: '4px' }}>
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--rtw-text-primary)', marginTop: '4px' }}>
               No tienes permisos para acceder a este módulo
             </h2>
           </div>
         </div>
 
-        <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '14px' }}>
+        <p style={{ fontSize: '0.88rem', color: 'var(--rtw-text-secondary)', marginBottom: '14px' }}>
           {accessEval.reason}
         </p>
 
         <div
           style={{
-            backgroundColor: '#f8fafc',
-            border: '1px solid #cbd5e1',
+            backgroundColor: 'var(--rtw-bg-subtle)',
+            border: '1px solid var(--rtw-border-light)',
             borderRadius: '8px',
             padding: '12px 14px',
             fontSize: '0.82rem',
-            color: '#1e293b',
+            color: 'var(--rtw-text-primary)',
             marginBottom: '16px',
             display: 'flex',
             flexDirection: 'column',
@@ -245,11 +264,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           }}
         >
           <div>
-            <Lock size={14} style={{ display: 'inline', marginRight: '6px', color: '#d4af37' }} />
-            <strong>Rol activo:</strong> {roleMeta.label}
+            <Lock size={14} style={{ display: 'inline', marginRight: '6px', color: 'var(--rtw-gold)' }} />
+            <strong>Rol activo:</strong> {roleMeta?.label ?? evaluatedProfile.role}
           </div>
           <div>
-            <strong>Alcance autorizado:</strong> {roleMeta.scopeRule}
+            <strong>Alcance autorizado:</strong> {roleMeta?.scopeRule ?? 'Acceso restringido'}
           </div>
         </div>
 
@@ -257,10 +276,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           <button
             type="button"
             className="rtw-btn rtw-btn-primary"
-            onClick={() => navigate('/')}
+            onClick={() => navigate(canAccessDashboard ? '/' : '/gestion/usuarios')}
           >
             <ArrowLeft size={15} />
-            Volver al Dashboard
+            {canAccessDashboard ? 'Volver al Dashboard' : 'Ir a Mi Perfil'}
           </button>
 
           {canInspectRoles && activeRolePreview && (

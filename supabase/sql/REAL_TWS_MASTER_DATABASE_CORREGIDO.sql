@@ -5090,7 +5090,7 @@ BEGIN
       v_lot_alloc.variant_id,
       v_lot_alloc.sku,
       v_lot_alloc.owner_id,
-      'RESERVATION_HOLD',
+      'reservation_hold',
       0,
       0,
       0,
@@ -5217,7 +5217,7 @@ BEGIN
       v_lot_alloc.variant_id,
       v_lot_alloc.sku,
       v_lot_alloc.owner_id,
-      'RESERVATION_RELEASE',
+      'reservation_release',
       0,
       0,
       0,
@@ -6384,7 +6384,17 @@ CREATE POLICY pol_audit_logs_insert_auth ON public.audit_logs
   FOR INSERT TO authenticated
   WITH CHECK (true);
 
-CREATE POLICY pol_private_docs_admin_operator ON storage.objects
+CREATE POLICY pol_private_docs_select_authorized ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'private-documents'
+    AND (
+      public.fn_is_admin()
+      OR public.fn_can_owner_view(split_part(name, '/', 1))
+    )
+  );
+
+CREATE POLICY pol_private_docs_admin_write ON storage.objects
   FOR ALL TO authenticated
   USING (
     bucket_id = 'private-documents'

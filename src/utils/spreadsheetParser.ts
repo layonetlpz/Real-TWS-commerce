@@ -28,6 +28,14 @@ export interface ParsedWorkbook {
 
 function decodeXmlEntities(text: string): string {
   return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => {
+      const cp = parseInt(hex, 16);
+      return Number.isFinite(cp) && cp > 0 ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&#(\d+);/g, (_, dec: string) => {
+      const cp = parseInt(dec, 10);
+      return Number.isFinite(cp) && cp > 0 ? String.fromCodePoint(cp) : '';
+    })
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -158,7 +166,9 @@ function parseSharedStrings(xml: string | undefined): string[] {
   const result: string[] = [];
   const siMatches = xml.match(/<si[\s>][\s\S]*?<\/si>/g) || [];
   for (const si of siMatches) {
-    const tMatches = [...si.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)];
+    // Excluir guías fonéticas <rPh> para no contaminar el texto real de la celda
+    const cleanedSi = si.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
+    const tMatches = [...cleanedSi.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)];
     result.push(decodeXmlEntities(tMatches.map((m) => m[1]).join('')));
   }
   return result;
@@ -193,12 +203,18 @@ function parseWorksheetXml(
   sharedStrings: string[]
 ): ParsedSheet {
   const rows: Record<number, Record<string, string>> = {};
-  const rowRegex = /<row\b[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
+  const rowRegex = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
   let rMatch: RegExpExecArray | null;
+  let fallbackRowNum = 0;
 
   while ((rMatch = rowRegex.exec(xml)) !== null) {
-    const rowNum = parseInt(rMatch[1], 10);
-    const rowBody = rMatch[2];
+    const rowAttrs = rMatch[1] || '';
+    const rowBody = rMatch[2] || '';
+    fallbackRowNum += 1;
+    if (!rowBody) continue;
+    const rowNumMatch = rowAttrs.match(/\br="(\d+)"/);
+    const rowNum = rowNumMatch ? parseInt(rowNumMatch[1], 10) : fallbackRowNum;
+    fallbackRowNum = rowNum;
     const rowCells: Record<string, string> = {};
 
     const cellRegex = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
@@ -264,23 +280,28 @@ export async function parseXlsxBuffer(
   const relsXml = entries['xl/_rels/workbook.xml.rels'] || '';
 
   const relTargetById: Record<string, string> = {};
-  const relMatches = [...relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)];
+  const relMatches = [...relsXml.matchAll(/<Relationship\b([^>]+)>/g)];
   for (const rm of relMatches) {
-    const id = rm[1];
-    const target = rm[2].startsWith('xl/') ? rm[2] : `xl/${rm[2].replace(/^\/+/, '')}`;
-    relTargetById[id] = target;
+    const attrs = rm[1];
+    const idMatch = attrs.match(/\bId="([^"]+)"/);
+    const targetMatch = attrs.match(/\bTarget="([^"]+)"/);
+    if (!idMatch || !targetMatch) continue;
+    const rawTarget = targetMatch[1].replace(/^\/+/, '');
+    relTargetById[idMatch[1]] = rawTarget.startsWith('xl/') ? rawTarget : `xl/${rawTarget}`;
   }
 
   const sheetNames: string[] = [];
   const sheets: Record<string, ParsedSheet> = {};
 
-  const sheetMatches = [
-    ...workbookXml.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)
-  ];
+  const sheetMatches = [...workbookXml.matchAll(/<sheet\b([^>]+)>/g)];
 
   sheetMatches.forEach((sm, idx) => {
-    const name = decodeXmlEntities(sm[1]);
-    const rId = sm[2];
+    const attrs = sm[1];
+    const nameMatch = attrs.match(/\bname="([^"]+)"/);
+    const ridMatch = attrs.match(/\br:id="([^"]+)"/);
+    if (!nameMatch || !ridMatch) return;
+    const name = decodeXmlEntities(nameMatch[1]);
+    const rId = ridMatch[1];
     const targetPath = relTargetById[rId] || `xl/worksheets/sheet${idx + 1}.xml`;
     const sheetXml = entries[targetPath] || '';
     sheetNames.push(name);
@@ -297,29 +318,49 @@ export async function parseXlsxBuffer(
   };
 }
 
-function parseCsvLine(line: string, delimiter: string): string[] {
-  const cols: string[] = [];
+export function parseCsvRecords(text: string, delimiter?: string): string[][] {
+  const cleanText = text.replace(/^\uFEFF/, '');
+  if (!cleanText.trim()) return [];
+  const firstLineEnd = cleanText.search(/\r?\n/);
+  const firstLine = firstLineEnd === -1 ? cleanText : cleanText.slice(0, firstLineEnd);
+  const sep =
+    delimiter ??
+    ((firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',');
+
+  const records: string[][] = [];
+  let row: string[] = [];
   let current = '';
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  for (let i = 0; i < cleanText.length; i++) {
+    const ch = cleanText[i];
     if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
+      if (inQuotes && cleanText[i + 1] === '"') {
         current += '"';
         i++;
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (ch === delimiter && !inQuotes) {
-      cols.push(current.trim());
+    } else if (ch === sep && !inQuotes) {
+      row.push(current.trim());
+      current = '';
+    } else if ((ch === '\r' || ch === '\n') && !inQuotes) {
+      if (ch === '\r' && cleanText[i + 1] === '\n') i++;
+      row.push(current.trim());
+      if (row.some((cell) => cell !== '')) {
+        records.push(row);
+      }
+      row = [];
       current = '';
     } else {
       current += ch;
     }
   }
-  cols.push(current.trim());
-  return cols;
+  row.push(current.trim());
+  if (row.some((cell) => cell !== '')) {
+    records.push(row);
+  }
+  return records;
 }
 
 export async function parseCsvUtf8Text(
@@ -330,24 +371,13 @@ export async function parseCsvUtf8Text(
   const buffer = encoder.encode(text).buffer;
   const fileHash = await computeBufferHash(buffer);
 
-  const cleanText = text.replace(/^\uFEFF/, '');
-  const rawLines = cleanText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (rawLines.length === 0) {
+  const parsedRecords = parseCsvRecords(text);
+  if (parsedRecords.length === 0) {
     throw new Error('El archivo CSV UTF-8 está vacío.');
   }
 
-  const firstLine = rawLines[0];
-  const semicolonCount = (firstLine.match(/;/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const delimiter = semicolonCount > commaCount ? ';' : ',';
-
   const rows: Record<number, Record<string, string>> = {};
-  rawLines.forEach((line, lineIdx) => {
-    const values = parseCsvLine(line, delimiter);
+  parsedRecords.forEach((values, lineIdx) => {
     const rowCells: Record<string, string> = {};
     values.forEach((val, colIdx) => {
       if (val !== '') {
@@ -389,7 +419,15 @@ export function exportRowsToCsvUtf8(
 ): void {
   const escapeCell = (val: string | number | null | undefined): string => {
     if (val === null || val === undefined) return '';
-    const str = String(val);
+    let str = String(val);
+    // Prevenir CSV Formula Injection en Excel/Sheets (preservando números negativos puros)
+    if (
+      typeof val !== 'number' &&
+      /^[=+\-@\t\r]/.test(str) &&
+      !/^-\d+(?:[.,]\d+)?$/.test(str.trim())
+    ) {
+      str = `'${str}`;
+    }
     if (/[",\r\n;]/.test(str)) {
       return `"${str.replace(/"/g, '""')}"`;
     }
@@ -412,5 +450,5 @@ export function exportRowsToCsvUtf8(
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

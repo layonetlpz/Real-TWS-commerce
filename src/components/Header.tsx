@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronRight, Lock, LogOut, Menu, Shield, UserCheck } from 'lucide-react';
 import { NAVIGATION_ITEMS } from '../lib/navigation';
-import { ROLES_CATALOG, ROUTE_PERMISSIONS } from '../lib/permissions';
+import { ALL_USER_ROLES, ROLES_CATALOG, ROUTE_PERMISSIONS } from '../lib/permissions';
 import { useOwnerScope } from '../hooks/useOwnerScope';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAuth } from '../hooks/useAuth';
@@ -10,19 +10,12 @@ import {
   fetchLiveOwnersFromSupabase,
   type DbOwnerRow
 } from '../services/supabaseDataBridge';
+import { ThemeSwitcher } from '../design-system/components/ThemeSwitcher';
 import type { UserRole } from '../types/domain';
 
 interface HeaderProps {
   onOpenMobileMenu: () => void;
 }
-
-const ALL_ROLES: UserRole[] = [
-  'ADMIN',
-  'INVENTORY_OPERATOR',
-  'SALES_OPERATOR',
-  'MARKETING_OPERATOR',
-  'OWNER'
-];
 
 export function Header({ onOpenMobileMenu }: HeaderProps) {
   const location = useLocation();
@@ -38,19 +31,23 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
     signOut
   } = useAuth();
   const [liveOwners, setLiveOwners] = useState<DbOwnerRow[]>([]);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     if (!isSupabaseReady || !userProfile) return;
-    fetchLiveOwnersFromSupabase().then(({ data }) => {
-      if (mounted) {
-        setLiveOwners(data);
+    fetchLiveOwnersFromSupabase().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) {
+        notify('warning', 'Propietarios', `No se pudieron cargar los propietarios: ${error}`);
+        return;
       }
+      setLiveOwners(data);
     });
     return () => {
       mounted = false;
     };
-  }, [isSupabaseReady, userProfile]);
+  }, [isSupabaseReady, userProfile, notify]);
 
   const currentNav =
     NAVIGATION_ITEMS.find((item) => item.path === location.pathname) ??
@@ -129,7 +126,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
                 );
               }}
             >
-              {ALL_ROLES.map((r) => (
+              {ALL_USER_ROLES.map((r) => (
                 <option key={r} value={r}>
                   {ROLES_CATALOG[r]?.label ?? r}
                 </option>
@@ -209,12 +206,15 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
           </span>
         </span>
 
+        <ThemeSwitcher compact />
+
         {canAccessSecurityModule && (
           <button
             type="button"
             className="rtw-btn rtw-btn-outline btn-sm"
             onClick={() => navigate('/gestion/usuarios')}
             title="Usuarios y permisos"
+            aria-label="Usuarios y permisos"
           >
             <Shield size={14} />
             <span className="rtw-desktop-only">Usuarios</span>
@@ -224,11 +224,20 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
         <button
           type="button"
           className="rtw-btn rtw-btn-outline btn-sm"
-          onClick={() => void signOut()}
+          disabled={signingOut}
+          onClick={async () => {
+            setSigningOut(true);
+            try {
+              await signOut();
+            } finally {
+              setSigningOut(false);
+            }
+          }}
           title="Cerrar sesión"
+          aria-label="Cerrar sesión"
         >
           <LogOut size={14} />
-          <span className="rtw-desktop-only">Salir</span>
+          <span className="rtw-desktop-only">{signingOut ? 'Saliendo...' : 'Salir'}</span>
         </button>
       </div>
     </header>

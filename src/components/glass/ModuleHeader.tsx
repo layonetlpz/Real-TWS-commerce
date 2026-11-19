@@ -63,7 +63,7 @@ export function ModuleHeader({
             paddingTop: '14px',
             borderTop: isDark
               ? '1px solid rgba(255, 255, 255, 0.10)'
-              : '1px solid rgba(15, 23, 42, 0.08)'
+              : '1px solid var(--rtw-border-light)'
           }}
         >
           {bottomSlot}

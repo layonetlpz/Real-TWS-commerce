@@ -4,6 +4,7 @@ import { AppRouter } from './app/AppRouter';
 import { NotificationProvider } from './hooks/useNotifications';
 import { OwnerScopeProvider } from './hooks/useOwnerScope';
 import { AuthProvider } from './hooks/useAuth';
+import { ThemeProvider } from './design-system';
 import './styles/theme.css';
 
 const rootElement = document.getElementById('root');
@@ -13,13 +14,15 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <NotificationProvider>
-      <OwnerScopeProvider>
-        <AuthProvider>
-          <AppRouter />
-        </AuthProvider>
-      </OwnerScopeProvider>
-    </NotificationProvider>
+    <ThemeProvider>
+      <NotificationProvider>
+        <OwnerScopeProvider>
+          <AuthProvider>
+            <AppRouter />
+          </AuthProvider>
+        </OwnerScopeProvider>
+      </NotificationProvider>
+    </ThemeProvider>
   </React.StrictMode>
 );
 

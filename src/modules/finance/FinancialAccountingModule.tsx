@@ -26,9 +26,14 @@ import {
   txRegisterAndAllocateExpense,
   buildOwnerAccountStatements,
   txCreateConciliatedSettlement,
+  txMarkSettlementPaid,
   runFinancialAccountingTestSuite
 } from '../../services/financialAccountingService';
-import { ensureExcelBaselineLoadedInInventory } from '../../services/inventoryPurchaseService';
+import {
+  ensureExcelBaselineLoadedInInventory,
+  syncOwnersIntoInventoryStore
+} from '../../services/inventoryPurchaseService';
+import { fetchLiveOwnersFromSupabase } from '../../services/supabaseDataBridge';
 import { exportRowsToCsvUtf8 } from '../../utils/spreadsheetParser';
 import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
@@ -51,30 +56,51 @@ interface FinancialAccountingModuleProps {
 export function FinancialAccountingModule({
   initialTab = 'COSTS'
 }: FinancialAccountingModuleProps) {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
-  const actorEmail = userProfile?.email || 'admin@realtws.co';
+  const actorEmail = userProfile?.email || 'sistema@realtws.co';
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canWriteFinance = effectiveRole === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<FinanceSectionTab>(initialTab);
   const [finState, setFinState] = useState<FinancialAccountingStoreState>(() =>
     getFinancialAccountingState()
   );
+  const [payoutVoucherById, setPayoutVoucherById] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
   useEffect(() => {
+    let active = true;
     const sync = () => setFinState(getFinancialAccountingState());
     window.addEventListener('rtw-financial-state-updated', sync);
     window.addEventListener('rtw-inventory-purchase-updated', sync);
 
     ensureExcelBaselineLoadedInInventory(actorEmail)
-      .then(() => setFinState(getFinancialAccountingState()))
+      .then(() => {
+        if (active) setFinState(getFinancialAccountingState());
+      })
+      .catch(() => {});
+
+    fetchLiveOwnersFromSupabase()
+      .then((res) => {
+        if (!active || res.error || res.data.length === 0) return;
+        syncOwnersIntoInventoryStore(
+          res.data.map((o) => ({
+            id: o.id,
+            fullName: o.full_name,
+            status: o.status === 'inactive' ? 'inactive' : 'active'
+          }))
+        );
+        if (active) setFinState(getFinancialAccountingState());
+      })
       .catch(() => {});
 
     return () => {
+      active = false;
       window.removeEventListener('rtw-financial-state-updated', sync);
       window.removeEventListener('rtw-inventory-purchase-updated', sync);
     };
@@ -90,10 +116,89 @@ export function FinancialAccountingModule({
     [finState]
   );
 
-  const activeOwnerStatement =
-    ownerStatements.find(
-      (s) => selectedOwnerScope === 'ALL' || s.ownerId === selectedOwnerScope
-    ) || ownerStatements[0];
+  const scopedStatements = useMemo(
+    () =>
+      selectedOwnerScope === 'ALL'
+        ? ownerStatements
+        : ownerStatements.filter((s) => s.ownerId === selectedOwnerScope),
+    [ownerStatements, selectedOwnerScope]
+  );
+
+  const pendingAgreementStatement = useMemo(
+    () => scopedStatements.find((s) => s.agreementIsPending) || null,
+    [scopedStatements]
+  );
+
+  const kpiSummary = useMemo(() => {
+    if (selectedOwnerScope !== 'ALL') {
+      const single = scopedStatements[0];
+      if (!single) return null;
+      return {
+        labelScope: single.ownerId,
+        netUnitsSold: single.netUnitsSold,
+        netSalesCop: single.netSalesCop,
+        cogsSoldCop: single.cogsSoldCop,
+        grossProfitCop: single.grossProfitCop,
+        storeCommissionCop: single.storeCommissionCop,
+        totalExpensesCop: single.totalExpensesCop,
+        attributableNetProfitCop: single.attributableNetProfitCop,
+        collectedCashFromSalesCop: single.collectedCashFromSalesCop,
+        uncollectedReceivablesCop: single.uncollectedReceivablesCop,
+        previousSettledPaymentsCop: single.previousSettledPaymentsCop,
+        finalConciliatedBalanceCop: single.finalConciliatedBalanceCop
+      };
+    }
+    const allHasPending = ownerStatements.some((s) => s.storeCommissionCop === null);
+    return {
+      labelScope: `${ownerStatements.length} prop.`,
+      netUnitsSold: ownerStatements.reduce((a, s) => a + s.netUnitsSold, 0),
+      netSalesCop: ownerStatements.reduce((a, s) => a + s.netSalesCop, 0),
+      cogsSoldCop: ownerStatements.reduce((a, s) => a + s.cogsSoldCop, 0),
+      grossProfitCop: ownerStatements.reduce((a, s) => a + s.grossProfitCop, 0),
+      storeCommissionCop: allHasPending
+        ? null
+        : ownerStatements.reduce((a, s) => a + (s.storeCommissionCop ?? 0), 0),
+      totalExpensesCop: ownerStatements.reduce((a, s) => a + s.totalExpensesCop, 0),
+      attributableNetProfitCop: ownerStatements.reduce(
+        (a, s) => a + s.attributableNetProfitCop,
+        0
+      ),
+      collectedCashFromSalesCop: ownerStatements.reduce(
+        (a, s) => a + s.collectedCashFromSalesCop,
+        0
+      ),
+      uncollectedReceivablesCop: ownerStatements.reduce(
+        (a, s) => a + s.uncollectedReceivablesCop,
+        0
+      ),
+      previousSettledPaymentsCop: ownerStatements.reduce(
+        (a, s) => a + s.previousSettledPaymentsCop,
+        0
+      ),
+      finalConciliatedBalanceCop: ownerStatements.reduce(
+        (a, s) => a + s.finalConciliatedBalanceCop,
+        0
+      )
+    };
+  }, [ownerStatements, scopedStatements, selectedOwnerScope]);
+
+  const filteredExpenses = useMemo(
+    () =>
+      selectedOwnerScope === 'ALL'
+        ? finState.expenses
+        : finState.expenses.filter((ex) =>
+            ex.slices.some((sl) => sl.ownerId === selectedOwnerScope)
+          ),
+    [finState.expenses, selectedOwnerScope]
+  );
+
+  const filteredSettlements = useMemo(
+    () =>
+      selectedOwnerScope === 'ALL'
+        ? finState.settlements
+        : finState.settlements.filter((st) => st.ownerId === selectedOwnerScope),
+    [finState.settlements, selectedOwnerScope]
+  );
 
   // ================= 1. LOT COST FORM =================
   const [selectedLotAllocId, setSelectedLotAllocId] = useState<string>('');
@@ -220,8 +325,19 @@ export function FinancialAccountingModule({
   const [testResults, setTestResults] = useState<FinancialTestScenarioResult[]>([]);
 
   // ================= HANDLERS =================
+  const denyWrite = () =>
+    notify(
+      'error',
+      'Permiso denegado (solo ADMIN)',
+      `El rol efectivo ${effectiveRole} tiene acceso únicamente de lectura en Finanzas.`
+    );
+
   const handleSaveLotCosts = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
     if (!selectedLotAllocId) return;
     try {
       const updated = updateLotAcquisitionAndDirectCosts(selectedLotAllocId, {
@@ -247,6 +363,10 @@ export function FinancialAccountingModule({
 
   const handleAuthorizeSkuPrice = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
     try {
       const rec = authorizeSkuCommercialPricing(
         {
@@ -275,6 +395,10 @@ export function FinancialAccountingModule({
 
   const handleRegisterExpense = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
     try {
       const exp = txRegisterAndAllocateExpense(
         {
@@ -313,6 +437,10 @@ export function FinancialAccountingModule({
 
   const handleSaveAgreement = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
     try {
       const saved = configureOwnerCommercialAgreement(
         {
@@ -362,6 +490,10 @@ export function FinancialAccountingModule({
 
   const handleCreateSettlement = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
     try {
       const created = txCreateConciliatedSettlement(
         {
@@ -391,6 +523,33 @@ export function FinancialAccountingModule({
     }
   };
 
+  const handleMarkSettlementPaid = (settlementId: string) => {
+    if (!canWriteFinance) {
+      denyWrite();
+      return;
+    }
+    try {
+      const voucher = (payoutVoucherById[settlementId] || '').trim();
+      const updated = txMarkSettlementPaid(
+        { settlementId, paymentVoucherReference: voucher },
+        actorEmail
+      );
+      setFinState(getFinancialAccountingState());
+      setPayoutVoucherById((prev) => {
+        const next = { ...prev };
+        delete next[settlementId];
+        return next;
+      });
+      notify(
+        'success',
+        `Desembolso ${updated.settlementCode} confirmado`,
+        'La liquidación pasó a estado paid_documented.'
+      );
+    } catch (err) {
+      notify('error', 'Pago rechazado', err instanceof Error ? err.message : '');
+    }
+  };
+
   const handleExportStatementsCsv = () => {
     exportRowsToCsvUtf8(
       'REAL_TWS_ESTADO_CUENTA_PROPIETARIOS.csv',
@@ -415,7 +574,7 @@ export function FinancialAccountingModule({
         'Pagos_Anteriores_COP',
         'Saldo_Final_Conciliado_COP'
       ],
-      ownerStatements.map((s) => [
+      scopedStatements.map((s) => [
         s.ownerId,
         s.ownerName,
         s.agreementIsPending ? 'PENDIENTE DE CONFIGURAR' : s.agreement.status,
@@ -439,10 +598,55 @@ export function FinancialAccountingModule({
     );
   };
 
+  const visibleTabs = [
+    ...(effectiveRole !== 'SALES_OPERATOR'
+      ? [{ id: 'COSTS' as FinanceSectionTab, label: 'Costos', icon: <Calculator size={14} /> }]
+      : []),
+    ...(effectiveRole === 'ADMIN' ||
+    effectiveRole === 'INVENTORY_OPERATOR' ||
+    effectiveRole === 'SALES_OPERATOR'
+      ? [
+          {
+            id: 'PRICES_SIMULATOR' as FinanceSectionTab,
+            label: 'Precios',
+            icon: <Tag size={14} />
+          }
+        ]
+      : []),
+    ...(effectiveRole === 'ADMIN' || effectiveRole === 'OWNER'
+      ? [
+          {
+            id: 'EXPENSES' as FinanceSectionTab,
+            label: 'Gastos',
+            icon: <Receipt size={14} />,
+            count: filteredExpenses.length
+          },
+          {
+            id: 'OWNERS_AGREEMENTS_STATEMENT' as FinanceSectionTab,
+            label: 'Propietarios',
+            icon: <Users size={14} />
+          },
+          {
+            id: 'SETTLEMENTS' as FinanceSectionTab,
+            label: 'Liquidaciones',
+            icon: <Landmark size={14} />,
+            count: filteredSettlements.length
+          }
+        ]
+      : []),
+    ...(effectiveRole === 'ADMIN'
+      ? [{ id: 'TESTS_8' as FinanceSectionTab, label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }]
+      : [])
+  ];
+
+  const effectiveTab = visibleTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : visibleTabs[0]?.id || 'COSTS';
+
   return (
     <div className="module-container">
       {/* BANNER SUPERIOR DE ALERTA CUANDO FALTA ACUERDO CONFIGURADO */}
-      {activeOwnerStatement?.agreementIsPending && (
+      {pendingAgreementStatement && (
         <div
           className="rtw-card"
           style={{
@@ -460,20 +664,22 @@ export function FinancialAccountingModule({
             <AlertTriangle size={20} color="var(--rtw-warning-text)" />
             <div>
               <div style={{ fontWeight: 700, color: 'var(--rtw-warning-text)', fontSize: '0.92rem' }}>
-                Acuerdo pendiente de configurar ({activeOwnerStatement.ownerId} · {activeOwnerStatement.ownerName})
+                Acuerdo pendiente de configurar ({pendingAgreementStatement.ownerId} · {pendingAgreementStatement.ownerName})
               </div>
               <div style={{ fontSize: '0.8rem', color: '#78350f' }}>
                 Define el porcentaje de distribución antes de registrar liquidaciones para este propietario.
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className="rtw-btn rtw-btn-primary btn-sm"
-            onClick={() => setActiveTab('OWNERS_AGREEMENTS_STATEMENT')}
-          >
-            Configurar acuerdo
-          </button>
+          {canWriteFinance && (
+            <button
+              type="button"
+              className="rtw-btn rtw-btn-primary btn-sm"
+              onClick={() => setActiveTab('OWNERS_AGREEMENTS_STATEMENT')}
+            >
+              Configurar acuerdo
+            </button>
+          )}
         </div>
       )}
 
@@ -482,7 +688,11 @@ export function FinancialAccountingModule({
         variant="dark"
         eyebrow="FINANZAS · CONTABILIDAD MULTIPROPIETARIO"
         title="Costos, Precios, Propietarios y Liquidaciones"
-        subtitle="Control de costos por lote, márgenes comerciales, gastos y estados de cuenta por propietario."
+        subtitle={
+          canWriteFinance
+            ? 'Control de costos por lote, márgenes comerciales, gastos y estados de cuenta por propietario.'
+            : `Modo consulta (${effectiveRole}): visualización acotada sin permisos de escritura financiera.`
+        }
         actions={
           <button
             type="button"
@@ -495,45 +705,28 @@ export function FinancialAccountingModule({
         bottomSlot={
           <SegmentedTabs<FinanceSectionTab>
             variant="dark"
-            value={activeTab}
+            value={effectiveTab}
             onChange={setActiveTab}
-            items={[
-              { id: 'COSTS', label: 'Costos', icon: <Calculator size={14} /> },
-              { id: 'PRICES_SIMULATOR', label: 'Precios', icon: <Tag size={14} /> },
-              {
-                id: 'EXPENSES',
-                label: 'Gastos',
-                icon: <Receipt size={14} />,
-                count: finState.expenses.length
-              },
-              { id: 'OWNERS_AGREEMENTS_STATEMENT', label: 'Propietarios', icon: <Users size={14} /> },
-              {
-                id: 'SETTLEMENTS',
-                label: 'Liquidaciones',
-                icon: <Landmark size={14} />,
-                count: finState.settlements.length
-              },
-              { id: 'TESTS_8', label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }
-            ]}
+            items={visibleTabs}
           />
         }
       />
 
       {/* KPIS FINANCIEROS MULTIPROPIETARIO */}
-      {activeOwnerStatement && (
+      {kpiSummary && (
         <section className="rtw-kpi-grid">
           <StatCard
             staggerIndex={1}
             label="Ventas Netas"
-            value={formatCOP(activeOwnerStatement.netSalesCop)}
-            sub={`${activeOwnerStatement.netUnitsSold} u. (${activeOwnerStatement.ownerId})`}
+            value={formatCOP(kpiSummary.netSalesCop)}
+            sub={`${kpiSummary.netUnitsSold} u. (${kpiSummary.labelScope})`}
             icon={<Tag size={16} />}
           />
           <StatCard
             staggerIndex={2}
             label="Costo Vendido (COGS)"
-            value={formatCOP(activeOwnerStatement.cogsSoldCop)}
-            sub={`Utilidad bruta: ${formatCOP(activeOwnerStatement.grossProfitCop)}`}
+            value={formatCOP(kpiSummary.cogsSoldCop)}
+            sub={`Utilidad bruta: ${formatCOP(kpiSummary.grossProfitCop)}`}
             icon={<Calculator size={16} />}
           />
           <StatCard
@@ -541,27 +734,27 @@ export function FinancialAccountingModule({
             tone="warning"
             label="Comisión REAL TWS"
             value={
-              activeOwnerStatement.storeCommissionCop === null
+              kpiSummary.storeCommissionCop === null
                 ? 'Por configurar'
-                : formatCOP(activeOwnerStatement.storeCommissionCop)
+                : formatCOP(kpiSummary.storeCommissionCop)
             }
-            sub={`Gastos asignados: ${formatCOP(activeOwnerStatement.totalExpensesCop)}`}
+            sub={`Gastos asignados: ${formatCOP(kpiSummary.totalExpensesCop)}`}
             icon={<Receipt size={16} />}
           />
           <StatCard
             staggerIndex={4}
             tone="success"
             label="Utilidad Neta"
-            value={formatCOP(activeOwnerStatement.attributableNetProfitCop)}
-            sub={`Cobrado: ${formatCOP(activeOwnerStatement.collectedCashFromSalesCop)} · Cartera: ${formatCOP(activeOwnerStatement.uncollectedReceivablesCop)}`}
+            value={formatCOP(kpiSummary.attributableNetProfitCop)}
+            sub={`Cobrado: ${formatCOP(kpiSummary.collectedCashFromSalesCop)} · Cartera: ${formatCOP(kpiSummary.uncollectedReceivablesCop)}`}
             icon={<CheckCircle2 size={16} />}
           />
           <StatCard
             staggerIndex={5}
-            tone={activeOwnerStatement.finalConciliatedBalanceCop < 0 ? 'danger' : 'gold'}
+            tone={kpiSummary.finalConciliatedBalanceCop < 0 ? 'danger' : 'gold'}
             label="Saldo Conciliado"
-            value={formatCOP(activeOwnerStatement.finalConciliatedBalanceCop)}
-            sub={`Pagos previos: ${formatCOP(activeOwnerStatement.previousSettledPaymentsCop)}`}
+            value={formatCOP(kpiSummary.finalConciliatedBalanceCop)}
+            sub={`Pagos previos: ${formatCOP(kpiSummary.previousSettledPaymentsCop)}`}
             icon={<Landmark size={16} />}
           />
         </section>
@@ -570,13 +763,13 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 1: COSTOS POR LOTE (COMPRA, TRANSPORTE, OTROS, EMPAQUE, PUBLICIDAD)
          ===================================================================== */}
-      {activeTab === 'COSTS' && (
+      {effectiveTab === 'COSTS' && (
         <div className="rtw-split-grid">
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '6px' }}>
               Estructura Completa de Costos por Lote y Propietario ({lotBreakdowns.length})
             </h3>
-            <p style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: '12px' }}>
+            <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)', marginBottom: '12px' }}>
               Costo Unitario Real de Adquisición = Costo Compra Lote + Transporte de Entrada + Otros Costos de Adquisición. Incluye Empaque Directo y Publicidad Atribuible.
             </p>
             <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
@@ -620,11 +813,11 @@ export function FinancialAccountingModule({
                     >
                       <td>
                         <code>{b.lotId}</code>
-                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{b.ownerId}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--rtw-text-muted)' }}>{b.ownerId}</div>
                       </td>
                       <td>
                         <div style={{ fontWeight: 800 }}>{b.sku}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--rtw-text-muted)' }}>
                           {b.productName}
                         </div>
                       </td>
@@ -667,7 +860,7 @@ export function FinancialAccountingModule({
                   onChange={(e) =>
                     setLotCostForm({ ...lotCostForm, purchaseUnitCostCop: e.target.value })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
               <label style={{ fontSize: '0.76rem', fontWeight: 700 }}>
@@ -682,7 +875,7 @@ export function FinancialAccountingModule({
                       inboundShippingUnitCostCop: Number(e.target.value)
                     })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
               <label style={{ fontSize: '0.76rem', fontWeight: 700 }}>
@@ -697,7 +890,7 @@ export function FinancialAccountingModule({
                       otherAcquisitionUnitCostCop: Number(e.target.value)
                     })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
               <label style={{ fontSize: '0.76rem', fontWeight: 700 }}>
@@ -712,7 +905,7 @@ export function FinancialAccountingModule({
                       packagingUnitCostCop: Number(e.target.value)
                     })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
               <label style={{ fontSize: '0.76rem', fontWeight: 700 }}>
@@ -727,10 +920,14 @@ export function FinancialAccountingModule({
                       attributableAdvertisingUnitCop: Number(e.target.value)
                     })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
-              <button type="submit" className="rtw-btn rtw-btn-primary">
+              <button
+                type="submit"
+                className="rtw-btn rtw-btn-primary"
+                disabled={!canWriteFinance}
+              >
                 Actualizar Costo Unitario Real del Lote
               </button>
             </form>
@@ -741,9 +938,9 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 2: PRECIOS, HISTORIAL INMUTABLE Y SIMULADOR FINANCIERO
          ===================================================================== */}
-      {activeTab === 'PRICES_SIMULATOR' && (
+      {effectiveTab === 'PRICES_SIMULATOR' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '16px' }}>
             {/* SIMULADOR DE PRECIOS, MARGEN, MARKUP, CONTRIBUCIÓN Y PUNTO DE EQUILIBRIO */}
             <section className="rtw-card">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
@@ -761,7 +958,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setSimInput({ ...simInput, baseAcquisitionCostCop: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -775,7 +972,7 @@ export function FinancialAccountingModule({
                         inboundFreightAndOtherCop: Number(e.target.value)
                       })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -786,7 +983,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setSimInput({ ...simInput, packagingUnitCostCop: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -800,7 +997,7 @@ export function FinancialAccountingModule({
                         attributableAdUnitCostCop: Number(e.target.value)
                       })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -811,7 +1008,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setSimInput({ ...simInput, storeCommissionPct: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -822,7 +1019,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setSimInput({ ...simInput, normalPriceCop: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -833,7 +1030,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setSimInput({ ...simInput, discountAppliedPct: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -847,7 +1044,7 @@ export function FinancialAccountingModule({
                         minimumAllowedPriceCop: Number(e.target.value)
                       })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.73rem', fontWeight: 700 }}>
@@ -861,7 +1058,7 @@ export function FinancialAccountingModule({
                         fixedExpensesPeriodCop: Number(e.target.value)
                       })
                     }
-                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
               </div>
@@ -870,10 +1067,10 @@ export function FinancialAccountingModule({
                 style={{
                   padding: '12px',
                   borderRadius: '8px',
-                  background: simulationResult.isBelowMinimumPrice ? '#fef2f2' : '#f8fafc',
+                  background: simulationResult.isBelowMinimumPrice ? 'var(--rtw-danger-bg)' : 'var(--rtw-bg-subtle)',
                   border: simulationResult.isBelowMinimumPrice
                     ? '1px solid #fca5a5'
-                    : '1px solid #cbd5e1',
+                    : '1px solid var(--rtw-border-light)',
                   fontSize: '0.78rem'
                 }}
               >
@@ -909,7 +1106,7 @@ export function FinancialAccountingModule({
                       : 'No alcanzable'}
                   </div>
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--rtw-text-secondary)' }}>
                   <strong>Verificación Matemática de Fórmulas:</strong>
                   <ul style={{ paddingLeft: '16px', margin: '4px 0 0' }}>
                     {simulationResult.formulaVerificationLog.map((line, i) => (
@@ -929,7 +1126,7 @@ export function FinancialAccountingModule({
                 <select
                   value={selectedSkuForPrice}
                   onChange={(e) => setSelectedSkuForPrice(e.target.value)}
-                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)', fontWeight: 700 }}
                 >
                   {skuPricingList.map((p) => (
                     <option key={p.sku} value={p.sku}>
@@ -951,7 +1148,7 @@ export function FinancialAccountingModule({
                           normalSalePriceCop: Number(e.target.value)
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
@@ -966,7 +1163,7 @@ export function FinancialAccountingModule({
                           promotionalPriceCop: e.target.value
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
@@ -981,7 +1178,7 @@ export function FinancialAccountingModule({
                           minimumAllowedPriceCop: Number(e.target.value)
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
@@ -997,7 +1194,7 @@ export function FinancialAccountingModule({
                           maxDiscountPct: Number(e.target.value)
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                 </div>
@@ -1011,21 +1208,25 @@ export function FinancialAccountingModule({
                       setPriceAuthForm({ ...priceAuthForm, changeReason: e.target.value })
                     }
                     required
-                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={!canWriteFinance}
+                >
                   Autorizar Precio y Registrar en price_history Inmutable
                 </button>
               </form>
 
-              <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+              <div style={{ marginTop: '12px', borderTop: '1px solid var(--rtw-border-light)', paddingTop: '10px' }}>
                 <h4 style={{ fontSize: '0.82rem', fontWeight: 800, marginBottom: '6px' }}>
                   Historial Inmutable de Precios ({finState.priceHistory.length})
                 </h4>
                 {finState.priceHistory.length === 0 ? (
-                  <p style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)' }}>
                     0 precios inventados. Autorice manualmente un precio comercial arriba para registrarlo en el historial inmutable.
                   </p>
                 ) : (
@@ -1071,8 +1272,14 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 3: GASTOS DIRECTOS Y COMPARTIDOS MULTICRITERIO
          ===================================================================== */}
-      {activeTab === 'EXPENSES' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '16px' }}>
+      {effectiveTab === 'EXPENSES' && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
+            gap: '16px'
+          }}
+        >
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '8px' }}>
               Registrar Gasto Directo o Compartido (Bloqueo de Criterios No Aprobados)
@@ -1085,14 +1292,14 @@ export function FinancialAccountingModule({
                   value={expForm.expenseCode}
                   onChange={(e) => setExpForm({ ...expForm, expenseCode: e.target.value })}
                   required
-                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
                 <input
                   type="date"
                   value={expForm.expenseDate}
                   onChange={(e) => setExpForm({ ...expForm, expenseDate: e.target.value })}
                   required
-                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </div>
 
@@ -1108,7 +1315,7 @@ export function FinancialAccountingModule({
                         : 'proportional_net_sales'
                   })
                 }
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)', fontWeight: 700 }}
               >
                 <option value="direct_owner">1. Gasto Directo de un Propietario (direct_owner)</option>
                 <option value="shared_multi_owner">
@@ -1127,7 +1334,7 @@ export function FinancialAccountingModule({
                     category: e.target.value as typeof expForm.category
                   })
                 }
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               >
                 <option value="Empaque y Embalaje">Empaque y Embalaje</option>
                 <option value="Publicidad Atribuible">Publicidad Atribuible</option>
@@ -1141,7 +1348,7 @@ export function FinancialAccountingModule({
                 <select
                   value={expForm.directOwnerId}
                   onChange={(e) => setExpForm({ ...expForm, directOwnerId: e.target.value })}
-                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 >
                   {Object.values(finState.agreements).map((a) => (
                     <option key={a.ownerId} value={a.ownerId}>
@@ -1160,7 +1367,7 @@ export function FinancialAccountingModule({
                       allocationCriterion: e.target.value as typeof expForm.allocationCriterion
                     })
                   }
-                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)', fontWeight: 700 }}
                 >
                   <option value="proportional_net_sales">
                     Criterio 1: Proporcional a Ventas Netas (proportional_net_sales)
@@ -1184,7 +1391,7 @@ export function FinancialAccountingModule({
                     onChange={(e) =>
                       setExpForm({ ...expForm, totalAmountCop: Number(e.target.value) })
                     }
-                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
@@ -1197,7 +1404,7 @@ export function FinancialAccountingModule({
                         approvalStatus: e.target.value as typeof expForm.approvalStatus
                       })
                     }
-                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   >
                     <option value="approved">Aprobado (Permitir aplicación)</option>
                     <option value="draft_unapproved">
@@ -1213,10 +1420,14 @@ export function FinancialAccountingModule({
                 value={expForm.description}
                 onChange={(e) => setExpForm({ ...expForm, description: e.target.value })}
                 required
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
 
-              <button type="submit" className="rtw-btn rtw-btn-primary">
+              <button
+                type="submit"
+                className="rtw-btn rtw-btn-primary"
+                disabled={!canWriteFinance}
+              >
                 Registrar y Prorratear Gasto Auditado
               </button>
             </form>
@@ -1224,10 +1435,10 @@ export function FinancialAccountingModule({
 
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
-              Libro Inmutable de Gastos y Prorrateo por Propietario ({finState.expenses.length})
+              Libro Inmutable de Gastos y Prorrateo por Propietario ({filteredExpenses.length})
             </h3>
-            {finState.expenses.length === 0 ? (
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            {filteredExpenses.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 No se han registrado gastos operativos adicionales aún.
               </p>
             ) : (
@@ -1243,7 +1454,7 @@ export function FinancialAccountingModule({
                   </tr>
                 </thead>
                 <tbody>
-                  {finState.expenses.map((ex) => (
+                  {filteredExpenses.map((ex) => (
                     <tr key={ex.id}>
                       <td style={{ fontWeight: 800 }}>{ex.expenseCode}</td>
                       <td>{ex.expenseDate}</td>
@@ -1275,9 +1486,15 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 4: PROPIETARIOS, ACUERDOS Y ESTADO DE CUENTA INDIVIDUAL
          ===================================================================== */}
-      {activeTab === 'OWNERS_AGREEMENTS_STATEMENT' && (
+      {effectiveTab === 'OWNERS_AGREEMENTS_STATEMENT' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '16px' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
+              gap: '16px'
+            }}
+          >
             {/* CONFIGURADOR DE ACUERDO COMERCIAL */}
             <section className="rtw-card">
               <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '8px' }}>
@@ -1287,21 +1504,52 @@ export function FinancialAccountingModule({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <input
                     type="text"
+                    list="rtw-finance-owners-list"
                     value={agrForm.ownerId}
-                    onChange={(e) => setAgrForm({ ...agrForm, ownerId: e.target.value })}
+                    disabled={!canWriteFinance}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      const matched = ownerStatements.find((o) => o.ownerId === nextId);
+                      setAgrForm({
+                        ...agrForm,
+                        ownerId: nextId,
+                        ownerName: matched?.ownerName || '',
+                        status: matched?.agreement.status === 'active' ? 'active' : 'pending_configuration',
+                        distributionModel:
+                          matched?.agreement.distributionModel || agrForm.distributionModel,
+                        storeCommissionPct:
+                          matched?.agreement.storeCommissionPct !== null &&
+                          matched?.agreement.storeCommissionPct !== undefined
+                            ? String(matched.agreement.storeCommissionPct)
+                            : '',
+                        ownerSharePct:
+                          matched?.agreement.ownerSharePct !== null &&
+                          matched?.agreement.ownerSharePct !== undefined
+                            ? String(matched.agreement.ownerSharePct)
+                            : ''
+                      });
+                    }}
                     placeholder="ID Propietario (ej. OWN-0001)"
                     required
-                    style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
+                  <datalist id="rtw-finance-owners-list">
+                    {ownerStatements.map((o) => (
+                      <option key={o.ownerId} value={o.ownerId}>
+                        {o.ownerName}
+                      </option>
+                    ))}
+                  </datalist>
                   <select
                     value={agrForm.status}
+                    disabled={!canWriteFinance}
                     onChange={(e) =>
                       setAgrForm({
                         ...agrForm,
                         status: e.target.value as 'pending_configuration' | 'active'
                       })
                     }
-                    style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                    style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)', fontWeight: 700 }}
                   >
                     <option value="pending_configuration">
                       PENDIENTE DE CONFIGURAR (Bloquea liquidación)
@@ -1309,6 +1557,16 @@ export function FinancialAccountingModule({
                     <option value="active">ACTIVO APROBADO</option>
                   </select>
                 </div>
+
+                <input
+                  type="text"
+                  value={agrForm.ownerName}
+                  disabled={!canWriteFinance}
+                  onChange={(e) => setAgrForm({ ...agrForm, ownerName: e.target.value })}
+                  placeholder="Nombre del Propietario (obligatorio)"
+                  required
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
+                />
 
                 <select
                   value={agrForm.distributionModel}
@@ -1318,7 +1576,7 @@ export function FinancialAccountingModule({
                       distributionModel: e.target.value as DistributionModelType
                     })
                   }
-                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 >
                   <option value="profit_split_pct">
                     Participación sobre Utilidad Bruta (profit_split_pct)
@@ -1343,7 +1601,7 @@ export function FinancialAccountingModule({
                       onChange={(e) =>
                         setAgrForm({ ...agrForm, storeCommissionPct: e.target.value })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.74rem', fontWeight: 700 }}>
@@ -1357,7 +1615,7 @@ export function FinancialAccountingModule({
                       onChange={(e) =>
                         setAgrForm({ ...agrForm, ownerSharePct: e.target.value })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.74rem', fontWeight: 700 }}>
@@ -1370,7 +1628,7 @@ export function FinancialAccountingModule({
                       onChange={(e) =>
                         setAgrForm({ ...agrForm, minimumPriceGuardPct: e.target.value })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.74rem', fontWeight: 700 }}>
@@ -1383,7 +1641,7 @@ export function FinancialAccountingModule({
                       onChange={(e) =>
                         setAgrForm({ ...agrForm, maxDiscountAllowedPct: e.target.value })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                 </div>
@@ -1400,7 +1658,7 @@ export function FinancialAccountingModule({
                             .value as typeof agrForm.advertisingResponsibility
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     >
                       <option value="owner_100_direct">100% Propietario (owner_100_direct)</option>
                       <option value="store_100_assumed">100% REAL TWS (store_100_assumed)</option>
@@ -1420,7 +1678,7 @@ export function FinancialAccountingModule({
                           sharedExpensePolicy: e.target.value as SharedExpensePolicyCriterion
                         })
                       }
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     >
                       <option value="proportional_net_sales">Proporcional Ventas Netas</option>
                       <option value="proportional_cogs">Proporcional Costo Vendido (COGS)</option>
@@ -1430,7 +1688,11 @@ export function FinancialAccountingModule({
                   </label>
                 </div>
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={!canWriteFinance}
+                >
                   Guardar Configuración de Acuerdo Comercial
                 </button>
               </form>
@@ -1458,7 +1720,7 @@ export function FinancialAccountingModule({
                     </tr>
                   </thead>
                   <tbody>
-                    {ownerStatements.map((st) => (
+                    {scopedStatements.map((st) => (
                       <tr key={st.ownerId}>
                         <td style={{ fontWeight: 800 }}>
                           {st.ownerId} ({st.ownerName})
@@ -1490,7 +1752,7 @@ export function FinancialAccountingModule({
                         <td
                           style={{
                             fontWeight: 800,
-                            color: st.finalConciliatedBalanceCop < 0 ? '#b91c1c' : '#0f172a'
+                            color: st.finalConciliatedBalanceCop < 0 ? 'var(--rtw-danger-text)' : 'var(--rtw-text-primary)'
                           }}
                         >
                           {formatCOP(st.finalConciliatedBalanceCop)}
@@ -1535,7 +1797,7 @@ export function FinancialAccountingModule({
                     </td>
                     <td>
                       <strong>{sa.sku}</strong>
-                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{sa.lotId}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--rtw-text-muted)' }}>{sa.lotId}</div>
                     </td>
                     <td>
                       <span className="rtw-badge rtw-badge-gold">{sa.ownerId}</span>
@@ -1552,7 +1814,7 @@ export function FinancialAccountingModule({
                       {formatCOP(sa.attributableOwnerProfitCop)}
                     </td>
                     <td>{formatCOP(sa.collectedCashCop)}</td>
-                    <td style={{ fontSize: '0.72rem', color: '#475569' }}>
+                    <td style={{ fontSize: '0.72rem', color: 'var(--rtw-text-secondary)' }}>
                       {sa.prorationDocumentation}
                     </td>
                   </tr>
@@ -1566,13 +1828,19 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 5: LIQUIDACIONES BAJO CONCILIACIÓN MANUAL
          ===================================================================== */}
-      {activeTab === 'SETTLEMENTS' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.45fr', gap: '16px' }}>
+      {effectiveTab === 'SETTLEMENTS' && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
+            gap: '16px'
+          }}
+        >
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '6px' }}>
               Aprobar Liquidación Conciliada (Sin Liquidación ni Pago Automático)
             </h3>
-            <p style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: '10px' }}>
+            <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)', marginBottom: '10px' }}>
               Bloquea automáticamente si falta acuerdo configurado (<strong>PENDIENTE DE CONFIGURAR</strong>), si el saldo es negativo o si no se confirma la conciliación.
             </p>
             <form onSubmit={handleCreateSettlement} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1580,16 +1848,18 @@ export function FinancialAccountingModule({
                 type="text"
                 placeholder="Código Liquidación (ej. LIQ-2026-0001)"
                 value={liqForm.settlementCode}
+                disabled={!canWriteFinance}
                 onChange={(e) => setLiqForm({ ...liqForm, settlementCode: e.target.value })}
                 required
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
               <select
                 value={liqForm.ownerId}
+                disabled={!canWriteFinance}
                 onChange={(e) => setLiqForm({ ...liqForm, ownerId: e.target.value })}
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)', fontWeight: 700 }}
               >
-                {ownerStatements.map((st) => (
+                {scopedStatements.map((st) => (
                   <option key={st.ownerId} value={st.ownerId}>
                     {st.ownerId} ({st.ownerName}) — Saldo: {formatCOP(st.finalConciliatedBalanceCop)}{' '}
                     {st.agreementIsPending ? '[PENDIENTE DE CONFIGURAR]' : '[ACUERDO ACTIVO]'}
@@ -1603,8 +1873,9 @@ export function FinancialAccountingModule({
                   <input
                     type="date"
                     value={liqForm.periodStart}
+                    disabled={!canWriteFinance}
                     onChange={(e) => setLiqForm({ ...liqForm, periodStart: e.target.value })}
-                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
                 <label style={{ fontSize: '0.74rem', fontWeight: 700 }}>
@@ -1612,8 +1883,9 @@ export function FinancialAccountingModule({
                   <input
                     type="date"
                     value={liqForm.periodEnd}
+                    disabled={!canWriteFinance}
                     onChange={(e) => setLiqForm({ ...liqForm, periodEnd: e.target.value })}
-                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </label>
               </div>
@@ -1624,10 +1896,11 @@ export function FinancialAccountingModule({
                   type="number"
                   min={1}
                   value={liqForm.amountToSettleCop}
+                  disabled={!canWriteFinance}
                   onChange={(e) =>
                     setLiqForm({ ...liqForm, amountToSettleCop: Number(e.target.value) })
                   }
-                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
               </label>
 
@@ -1635,9 +1908,10 @@ export function FinancialAccountingModule({
                 type="text"
                 placeholder="Referencia de Comprobante / Acta de Conciliación"
                 value={liqForm.voucherReference}
+                disabled={!canWriteFinance}
                 onChange={(e) => setLiqForm({ ...liqForm, voucherReference: e.target.value })}
                 required
-                style={{ padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
 
               <label
@@ -1649,13 +1923,14 @@ export function FinancialAccountingModule({
                   fontWeight: 700,
                   padding: '8px',
                   borderRadius: '6px',
-                  background: '#f8fafc',
-                  border: '1px solid #cbd5e1'
+                  background: 'var(--rtw-bg-subtle)',
+                  border: '1px solid var(--rtw-border-light)'
                 }}
               >
                 <input
                   type="checkbox"
                   checked={liqForm.isConciliatedConfirmed}
+                  disabled={!canWriteFinance}
                   onChange={(e) =>
                     setLiqForm({ ...liqForm, isConciliatedConfirmed: e.target.checked })
                   }
@@ -1663,7 +1938,11 @@ export function FinancialAccountingModule({
                 Confirmo conciliación física y contable previa antes de aprobar
               </label>
 
-              <button type="submit" className="rtw-btn rtw-btn-primary">
+              <button
+                type="submit"
+                className="rtw-btn rtw-btn-primary"
+                disabled={!canWriteFinance}
+              >
                 <CheckCircle2 size={15} /> Aprobar Liquidación Conciliada (Sin Pago Automático)
               </button>
             </form>
@@ -1671,10 +1950,10 @@ export function FinancialAccountingModule({
 
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
-              Historial Inmutable de Liquidaciones ({finState.settlements.length})
+              Historial Inmutable de Liquidaciones ({filteredSettlements.length})
             </h3>
-            {finState.settlements.length === 0 ? (
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            {filteredSettlements.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 No se han emitido liquidaciones en producción todavía (el acuerdo inicial de OWN-0001 Eberto inicia en estado PENDIENTE DE CONFIGURAR).
               </p>
             ) : (
@@ -1694,7 +1973,7 @@ export function FinancialAccountingModule({
                   </tr>
                 </thead>
                 <tbody>
-                  {finState.settlements.map((st) => (
+                  {filteredSettlements.map((st) => (
                     <tr key={st.id}>
                       <td style={{ fontWeight: 800 }}>{st.settlementCode}</td>
                       <td>
@@ -1720,7 +1999,44 @@ export function FinancialAccountingModule({
                       <td style={{ fontWeight: 800 }}>{formatCOP(st.finalRemainingBalanceCop)}</td>
                       <td>
                         <div>{st.voucherReference}</div>
-                        <span className="rtw-badge rtw-badge-gold">{st.approvalState}</span>
+                        <span
+                          className={`rtw-badge ${
+                            st.approvalState === 'paid_documented'
+                              ? 'rtw-badge-success'
+                              : 'rtw-badge-gold'
+                          }`}
+                        >
+                          {st.approvalState}
+                        </span>
+                        {canWriteFinance && st.approvalState === 'approved_pending_payment' && (
+                          <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                            <input
+                              type="text"
+                              placeholder="Ref. transferencia"
+                              value={payoutVoucherById[st.id] || ''}
+                              onChange={(e) =>
+                                setPayoutVoucherById((prev) => ({
+                                  ...prev,
+                                  [st.id]: e.target.value
+                                }))
+                              }
+                              style={{
+                                width: '120px',
+                                padding: '4px 6px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--rtw-border-light)',
+                                fontSize: '0.72rem'
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="rtw-btn rtw-btn-primary btn-sm"
+                              onClick={() => handleMarkSettlementPaid(st.id)}
+                            >
+                              Registrar pago
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1734,7 +2050,7 @@ export function FinancialAccountingModule({
       {/* =====================================================================
           PESTAÑA 6: BATERÍA DE LAS 8 PRUEBAS OBLIGATORIAS EN SANDBOX
          ===================================================================== */}
-      {activeTab === 'TESTS_8' && (
+      {effectiveTab === 'TESTS_8' && (
         <section className="rtw-card">
           <div
             style={{
@@ -1750,7 +2066,7 @@ export function FinancialAccountingModule({
               <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
                 Batería Automatizada de las 8 Pruebas Financieras y Multipropietario (Sandbox Aislado)
               </h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 Verifica: 1. Ventas de un propietario · 2. Ventas repartidas entre dos propietarios · 3. Devoluciones · 4. Gastos directos · 5. Gastos comunes · 6. Liquidación parcial · 7. Saldo negativo · 8. Acuerdo no configurado.
               </p>
             </div>
@@ -1773,11 +2089,11 @@ export function FinancialAccountingModule({
           </div>
 
           {testResults.length === 0 ? (
-            <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
               Haga clic en "Ejecutar las 8 Pruebas Financieras Obligatorias" para verificar todas las fórmulas y bloqueos.
             </p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(350px, 100%), 1fr))', gap: '12px' }}>
               {testResults.map((tr) => (
                 <div
                   key={tr.testId}
@@ -1785,11 +2101,11 @@ export function FinancialAccountingModule({
                     padding: '12px 14px',
                     borderRadius: '8px',
                     border: tr.passed ? '1px solid #86efac' : '1px solid #fca5a5',
-                    background: tr.passed ? '#f0fdf4' : '#fef2f2'
+                    background: tr.passed ? 'var(--rtw-success-bg)' : 'var(--rtw-danger-bg)'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>
+                    <span style={{ fontWeight: 800, fontSize: '0.84rem', color: 'var(--rtw-text-primary)' }}>
                       {tr.title}
                     </span>
                     <span
@@ -1805,13 +2121,13 @@ export function FinancialAccountingModule({
                       {tr.passed ? 'PASSED' : 'FAILED'}
                     </span>
                   </div>
-                  <p style={{ fontSize: '0.75rem', color: '#334155', marginBottom: '5px' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--rtw-text-secondary)', marginBottom: '5px' }}>
                     {tr.scenario}
                   </p>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--rtw-text-primary)', marginBottom: '4px' }}>
                     Resultado: {tr.actual}
                   </div>
-                  <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.72rem', color: '#475569' }}>
+                  <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.72rem', color: 'var(--rtw-text-secondary)' }}>
                     {tr.details.map((d, idx) => (
                       <li key={idx}>{d}</li>
                     ))}

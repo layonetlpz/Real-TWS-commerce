@@ -1,35 +1,70 @@
-import { useState } from 'react';
-import { KeyRound, Lock, Mail, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { KeyRound, Lock, Mail, ShieldCheck, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import {
   requestPasswordRecovery,
   updateAuthenticatedUserPassword
 } from '../../services/authService';
+import { isValidEmailFormat } from '../../utils/validations';
 import { SegmentedTabs } from '../../components/glass';
+import { RealTwsPlaqueBanner } from '../../design-system/components/RealTwsBrandMark';
 
 type AuthMode = 'LOGIN' | 'RECOVERY' | 'UPDATE_PASSWORD';
 
 interface AuthPortalCardProps {
   initialMode?: AuthMode;
+  authenticatedOnly?: boolean;
 }
 
-export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
-  const { signIn, isSupabaseReady } = useAuth();
+export function AuthPortalCard({
+  initialMode = 'LOGIN',
+  authenticatedOnly = false
+}: AuthPortalCardProps) {
+  const { authStatus, signIn, isSupabaseReady } = useAuth();
   const { notify } = useNotifications();
 
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
+  const allowPasswordUpdate =
+    authenticatedOnly ||
+    authStatus === 'AUTHENTICATED' ||
+    authStatus === 'PASSWORD_RECOVERY';
+
+  const visibleTabs = authenticatedOnly
+    ? [{ id: 'UPDATE_PASSWORD' as const, label: 'Nueva clave', icon: <KeyRound size={13} /> }]
+    : [
+        { id: 'LOGIN' as const, label: 'Entrar', icon: <Lock size={13} /> },
+        { id: 'RECOVERY' as const, label: 'Recuperar', icon: <Mail size={13} /> },
+        ...(allowPasswordUpdate
+          ? [{ id: 'UPDATE_PASSWORD' as const, label: 'Nueva clave', icon: <KeyRound size={13} /> }]
+          : [])
+      ];
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setFeedbackMessage(null);
+    if (!isValidEmailFormat(email)) {
+      setErrorMessage('Ingresa un correo electrónico válido.');
+      return;
+    }
+    if (!password) {
+      setErrorMessage('Ingresa tu contraseña.');
+      return;
+    }
     setSubmitting(true);
 
     const { error } = await signIn(email, password);
@@ -48,6 +83,10 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
     e.preventDefault();
     setErrorMessage(null);
     setFeedbackMessage(null);
+    if (!isValidEmailFormat(email)) {
+      setErrorMessage('Ingresa un correo electrónico válido.');
+      return;
+    }
     setSubmitting(true);
 
     const { error } = await requestPasswordRecovery(email);
@@ -68,6 +107,14 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
     e.preventDefault();
     setErrorMessage(null);
     setFeedbackMessage(null);
+    if (newPassword.length < 8) {
+      setErrorMessage('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setErrorMessage('Las contraseñas ingresadas no coinciden.');
+      return;
+    }
     setSubmitting(true);
 
     const { error } = await updateAuthenticatedUserPassword(newPassword);
@@ -82,11 +129,17 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
     const msg = 'Tu contraseña se actualizó correctamente.';
     setFeedbackMessage(msg);
     setNewPassword('');
+    setConfirmPassword('');
     notify('success', 'Contraseña actualizada', msg);
   };
 
   return (
     <div className="rtw-card rtw-auth-card rtw-glass-elevated rtw-card-gold-top">
+      {!authenticatedOnly && (
+        <div style={{ marginBottom: '16px' }}>
+          <RealTwsPlaqueBanner compact />
+        </div>
+      )}
       <div
         style={{
           display: 'flex',
@@ -109,14 +162,14 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
               justifyContent: 'center'
             }}
           >
-            <ShieldCheck size={20} color="#e8c766" />
+            <ShieldCheck size={20} color="#e8c766" aria-hidden="true" />
           </span>
           <div>
-            <h2 style={{ fontSize: '1.14rem', fontWeight: 800, color: 'var(--rtw-text-primary)' }}>
+            <h1 style={{ margin: 0, fontSize: '1.14rem', fontWeight: 800, color: 'var(--rtw-text-primary)' }}>
               {mode === 'LOGIN' && 'Iniciar sesión'}
               {mode === 'RECOVERY' && 'Recuperar acceso'}
               {mode === 'UPDATE_PASSWORD' && 'Nueva contraseña'}
-            </h2>
+            </h1>
             <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
               {mode === 'LOGIN' && 'Accede a tu espacio de trabajo REAL TWS.'}
               {mode === 'RECOVERY' && 'Ingresa tu correo para recibir instrucciones.'}
@@ -132,21 +185,19 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
         </span>
       </div>
 
-      <div style={{ marginBottom: '18px' }}>
-        <SegmentedTabs<AuthMode>
-          value={mode}
-          onChange={(next) => {
-            setMode(next);
-            setErrorMessage(null);
-            setFeedbackMessage(null);
-          }}
-          items={[
-            { id: 'LOGIN', label: 'Entrar', icon: <Lock size={13} /> },
-            { id: 'RECOVERY', label: 'Recuperar', icon: <Mail size={13} /> },
-            { id: 'UPDATE_PASSWORD', label: 'Nueva clave', icon: <KeyRound size={13} /> }
-          ]}
-        />
-      </div>
+      {visibleTabs.length > 1 && (
+        <div style={{ marginBottom: '18px' }}>
+          <SegmentedTabs<AuthMode>
+            value={mode}
+            onChange={(next) => {
+              setMode(next);
+              setErrorMessage(null);
+              setFeedbackMessage(null);
+            }}
+            items={visibleTabs}
+          />
+        </div>
+      )}
 
       {mode === 'LOGIN' && (
         <form onSubmit={handleLoginSubmit} noValidate>
@@ -171,16 +222,42 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
               <label className="rtw-label" htmlFor="auth-login-password">
                 Contraseña
               </label>
-              <input
-                id="auth-login-password"
-                type="password"
-                className="rtw-input"
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="auth-login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="rtw-input"
+                  style={{ paddingRight: '44px' }}
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  style={{
+                    position: 'absolute',
+                    right: '6px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '34px',
+                    height: '34px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--rtw-text-muted)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -189,7 +266,7 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
               style={{ width: '100%', marginTop: '4px' }}
               disabled={submitting}
             >
-              <Lock size={15} />
+              <Lock size={15} aria-hidden="true" />
               {submitting ? 'Ingresando...' : 'Continuar'}
             </button>
           </div>
@@ -241,6 +318,23 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
                 placeholder="Mínimo 8 caracteres"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+
+            <div className="rtw-field">
+              <label className="rtw-label" htmlFor="auth-confirm-password">
+                Confirmar contraseña
+              </label>
+              <input
+                id="auth-confirm-password"
+                type="password"
+                className="rtw-input"
+                placeholder="Repite la nueva contraseña"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
                 required
               />
             </div>
@@ -260,6 +354,8 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
       {errorMessage && (
         <div
+          role="alert"
+          aria-live="polite"
           style={{
             marginTop: '14px',
             padding: '10px 12px',
@@ -277,6 +373,8 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
 
       {feedbackMessage && (
         <div
+          role="status"
+          aria-live="polite"
           style={{
             marginTop: '14px',
             padding: '10px 12px',
@@ -291,7 +389,7 @@ export function AuthPortalCard({ initialMode = 'LOGIN' }: AuthPortalCardProps) {
             gap: '8px'
           }}
         >
-          <CheckCircle2 size={16} />
+          <CheckCircle2 size={16} aria-hidden="true" />
           {feedbackMessage}
         </div>
       )}

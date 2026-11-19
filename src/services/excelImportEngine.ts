@@ -100,6 +100,8 @@ export interface ImportIssue {
     | 'PENDING_PHYSICAL_COUNT'
     | 'HISTORICAL_SOLD_ZERO_STOCK'
     | 'GENERATED_IMPORT_LOT'
+    | 'NEGATIVE_COST'
+    | 'INVALID_PRICE'
     | 'NO_SALE_PRICE_CONFIGURED';
   rowNumber: number;
   sourceSheet: string;
@@ -278,6 +280,42 @@ export function getCurrentImportState(): PersistedImportState {
   return loadPersistedImportState();
 }
 
+export function buildImportRowStorageKey(r: {
+  sku: string;
+  ownerId: string;
+  lotId: string;
+}): string {
+  return `${r.sku}::${r.ownerId}::${r.lotId}`;
+}
+
+export function syncOwnersIntoImportStore(
+  liveOwners: Array<{ id: string; fullName: string; status: 'active' | 'inactive' }>
+): PersistedImportState {
+  const current = loadPersistedImportState();
+  if (!liveOwners || liveOwners.length === 0) return current;
+
+  const byId = new Map<string, { id: string; fullName: string; status: 'active' | 'inactive' }>();
+  for (const existing of current.registeredOwners) {
+    byId.set(existing.id, existing);
+  }
+  for (const owner of liveOwners) {
+    if (!owner.id?.trim()) continue;
+    byId.set(owner.id.trim(), {
+      id: owner.id.trim(),
+      fullName: owner.fullName?.trim() || owner.id.trim(),
+      status: owner.status === 'inactive' ? 'inactive' : 'active'
+    });
+  }
+
+  const nextOwners = Array.from(byId.values());
+  const next: PersistedImportState = {
+    ...current,
+    registeredOwners: nextOwners
+  };
+  savePersistedImportState(next);
+  return next;
+}
+
 export function resetImportedOpeningInventoryForDemo(): void {
   const fresh: PersistedImportState = {
     registeredOwners: [...DEFAULT_REGISTERED_OWNERS],
@@ -335,10 +373,13 @@ export function computeSystemStateSummary(
     }
   }
 
+  const uniqueProductCodes = new Set(rows.map((r) => r.productCode || r.sku));
+  const uniqueSkus = new Set(rows.map((r) => r.sku));
+
   return {
     totalOwners: ownersCount,
-    totalProducts: rows.length,
-    totalVariantsSku: rows.length,
+    totalProducts: uniqueProductCodes.size,
+    totalVariantsSku: uniqueSkus.size,
     totalOpeningLots: activeOpeningRows.length,
     totalOpeningMovements: activeOpeningRows.length,
     totalPhysicalUnits,
@@ -622,7 +663,7 @@ function normalizeSingleSheetOrCsvWorkbook(
       rowNumber: rNum,
       legacyExcelRowId: rNum - sheet.headerRowNumber,
       sourceSheet: firstSheetName,
-      rowIdempotencyKey: `${workbook.fileHash}:${sku || `ROW-${rNum}`}:${ownerId || 'NO-OWNER'}`,
+      rowIdempotencyKey: `${workbook.fileHash}:${sku || `ROW-${rNum}`}:${ownerId || 'NO-OWNER'}:${lotId || 'NO-LOT'}`,
       ownerId,
       ownerName: ownerId === 'OWN-0001' ? 'Eberto' : ownerId,
       productCode,
@@ -832,53 +873,62 @@ export function analyzeWorkbookForImport(
     });
   }
 
-  // 2. Track SKUs within file for duplicate detection
-  const skuRowMap: Record<string, number[]> = {};
+  // 2. Track (SKU + Owner + Lot) combinations within file for intra-file duplicate detection
+  //    Permite el mismo SKU asignado a distintos propietarios o distintos lotes sin bloquear multipropiedad.
+  const comboRowMap: Record<string, { sku: string; ownerId: string; rowNumbers: number[] }> = {};
   for (const r of rows) {
+    const matchedOwner = state.registeredOwners.find((o) => o.id === r.ownerId);
+    if (matchedOwner?.fullName) {
+      r.ownerName = matchedOwner.fullName;
+    }
     if (r.sku) {
-      skuRowMap[r.sku] = skuRowMap[r.sku] || [];
-      skuRowMap[r.sku].push(r.rowNumber);
+      const comboKey = buildImportRowStorageKey(r);
+      if (!comboRowMap[comboKey]) {
+        comboRowMap[comboKey] = { sku: r.sku, ownerId: r.ownerId, rowNumbers: [] };
+      }
+      comboRowMap[comboKey].rowNumbers.push(r.rowNumber);
     }
   }
 
-  for (const [sku, rNums] of Object.entries(skuRowMap)) {
-    if (rNums.length > 1) {
+  for (const entry of Object.values(comboRowMap)) {
+    if (entry.rowNumbers.length > 1) {
       duplicates.push({
-        sku,
-        rowNumbers: rNums,
+        sku: entry.sku,
+        rowNumbers: entry.rowNumbers,
         duplicateScope: 'INTRA_FILE',
         resolution: 'BLOCK_IMPORT',
-        detail: `El SKU "${sku}" aparece ${rNums.length} veces dentro del mismo archivo (filas ${rNums.join(', ')}).`
+        detail: `La combinación SKU/Propietario/Lote ("${entry.sku}" / ${entry.ownerId || 'SIN-PROP'}) aparece ${entry.rowNumbers.length} veces dentro del mismo archivo (filas ${entry.rowNumbers.join(', ')}).`
       });
       errors.push({
-        id: `ERR-DUP-FILE-${sku}`,
+        id: `ERR-DUP-FILE-${entry.sku}-${entry.ownerId || 'NO-OWNER'}-${entry.rowNumbers[1]}`,
         severity: 'ERROR',
         code: 'DUPLICATE_SKU_IN_FILE',
-        rowNumber: rNums[1],
+        rowNumber: entry.rowNumbers[1],
         sourceSheet: rows[0]?.sourceSheet || 'WORKBOOK',
-        sku,
-        ownerId: rows.find((x) => x.sku === sku)?.ownerId || '',
+        sku: entry.sku,
+        ownerId: entry.ownerId,
         field: 'sku',
-        message: `SKU duplicado dentro del archivo: "${sku}" en filas ${rNums.join(', ')}.`,
-        remediation: 'Elimine o consolide las filas duplicadas antes de confirmar la importación.'
+        message: `Fila duplicada dentro del archivo para SKU "${entry.sku}" (Propietario ${entry.ownerId || 'vacío'}) en filas ${entry.rowNumbers.join(', ')}.`,
+        remediation: 'Elimine o consolide las filas duplicadas (o diferencie lote/propietario) antes de confirmar.'
       });
     }
   }
 
   // 3. Validate each row
   for (const r of rows) {
-    // Check already imported SKU/row in previous committed batch
-    if (state.importedRowsByKey[r.sku]) {
+    const rowKey = buildImportRowStorageKey(r);
+    // Check already imported SKU/owner/lot (or legacy single-SKU key) in previous committed batch
+    if (state.importedRowsByKey[rowKey] || state.importedRowsByKey[r.sku]) {
       duplicates.push({
         sku: r.sku,
         rowNumbers: [r.rowNumber],
         duplicateScope: 'ALREADY_COMMITTED_BATCH',
         existingBatchCode: state.batchesHistory.find((b) => b.batchStatus === 'COMMITTED')?.batchCode,
         resolution: 'BLOCK_IMPORT',
-        detail: `El SKU "${r.sku}" ya existe en el inventario inicial importado previamente.`
+        detail: `El SKU "${r.sku}" (${r.ownerId} · ${r.lotId}) ya existe en el inventario inicial importado previamente.`
       });
       errors.push({
-        id: `ERR-ROW-DUP-${r.rowNumber}-${r.sku}`,
+        id: `ERR-ROW-DUP-${r.rowNumber}-${r.sku}-${r.ownerId}`,
         severity: 'ERROR',
         code: 'ROW_ALREADY_IMPORTED',
         rowNumber: r.rowNumber,
@@ -886,8 +936,8 @@ export function analyzeWorkbookForImport(
         sku: r.sku,
         ownerId: r.ownerId,
         field: 'sku / row_idempotency_key',
-        message: `El SKU "${r.sku}" ya fue importado en un lote previo. Prohibido duplicar productos o saldos iniciales.`,
-        remediation: 'Use Recepciones y Compras para nuevos ingresos o revise el historial de importaciones.'
+        message: `El registro "${r.sku}" (${r.ownerId} · ${r.lotId}) ya fue importado en un lote previo. Prohibido duplicar saldos iniciales.`,
+        remediation: 'Use Recepciones y Compras para nuevos ingresos o especifique un lote distinto.'
       });
     }
 
@@ -936,8 +986,12 @@ export function analyzeWorkbookForImport(
       });
     }
 
-    // Quantity validation
+    // Quantity validation (integers >= 0 & conservation equation)
     if (
+      !Number.isInteger(r.qtyPhysical) ||
+      !Number.isInteger(r.qtyGood) ||
+      !Number.isInteger(r.qtyDefective) ||
+      !Number.isInteger(r.qtyPendingInspection) ||
       r.qtyPhysical < 0 ||
       r.qtyGood < 0 ||
       r.qtyDefective < 0 ||
@@ -952,7 +1006,7 @@ export function analyzeWorkbookForImport(
         sku: r.sku,
         ownerId: r.ownerId,
         field: 'qty_physical',
-        message: `Cantidad negativa o faltante en fila ${r.rowNumber} (${r.sku}).`,
+        message: `Cantidad inválida, decimal o negativa en fila ${r.rowNumber} (${r.sku}).`,
         remediation: 'Las cantidades físicas, aptas, defectuosas y pendientes deben ser enteros >= 0.'
       });
     } else if (r.qtyPhysical !== r.qtyGood + r.qtyDefective + r.qtyPendingInspection) {
@@ -967,6 +1021,39 @@ export function analyzeWorkbookForImport(
         field: 'qty_physical',
         message: `Descuadre de inventario físico en fila ${r.rowNumber} (${r.sku}): Cant. Física (${r.qtyPhysical}) != Apta (${r.qtyGood}) + Defectuosa (${r.qtyDefective}) + Pendiente (${r.qtyPendingInspection}).`,
         remediation: 'Corrija el desglose de unidades para que la suma coincida exactamente con el conteo físico.'
+      });
+    }
+
+    // Cost and sale price bounds validation (prevent negative/NaN costs or prices)
+    if (r.unitCostCop !== null && (!Number.isFinite(r.unitCostCop) || r.unitCostCop < 0)) {
+      errors.push({
+        id: `ERR-NEG-COST-${r.rowNumber}`,
+        severity: 'ERROR',
+        code: 'NEGATIVE_COST',
+        rowNumber: r.rowNumber,
+        sourceSheet: r.sourceSheet,
+        sku: r.sku,
+        ownerId: r.ownerId,
+        field: 'unit_cost_cop',
+        message: `Costo unitario negativo o inválido (${r.unitCostCop}) en fila ${r.rowNumber} (${r.sku}).`,
+        remediation: 'El costo unitario debe ser >= 0 o quedar vacío para marcarse como PENDING_COST.'
+      });
+    }
+    if (
+      r.approvedSalePriceCop !== null &&
+      (!Number.isFinite(r.approvedSalePriceCop) || r.approvedSalePriceCop <= 0)
+    ) {
+      errors.push({
+        id: `ERR-INVALID-PRICE-${r.rowNumber}`,
+        severity: 'ERROR',
+        code: 'INVALID_PRICE',
+        rowNumber: r.rowNumber,
+        sourceSheet: r.sourceSheet,
+        sku: r.sku,
+        ownerId: r.ownerId,
+        field: 'approved_sale_price_cop',
+        message: `Precio de venta inválido (${r.approvedSalePriceCop}) en fila ${r.rowNumber} (${r.sku}).`,
+        remediation: 'El precio aprobado de venta debe ser > 0 COP o quedar vacío.'
       });
     }
 
@@ -1042,7 +1129,7 @@ export function analyzeWorkbookForImport(
   };
   if (errors.length === 0) {
     for (const r of rows) {
-      projectedMap[r.sku] = r;
+      projectedMap[buildImportRowStorageKey(r)] = r;
     }
   }
   const summaryProjectedAfter = computeSystemStateSummary(
@@ -1202,15 +1289,16 @@ export async function commitImportBatch(
 
     const newMovements: OpeningBalanceMovementRecord[] = [];
     for (const r of analysis.rows) {
-      if (targetState.importedRowsByKey[r.sku]) {
-        throw new Error(`SKU duplicado detectado durante transacción: ${r.sku}`);
+      const rowKey = buildImportRowStorageKey(r);
+      if (targetState.importedRowsByKey[rowKey] || targetState.importedRowsByKey[r.sku]) {
+        throw new Error(`Registro duplicado detectado durante transacción: ${r.sku} (${r.ownerId} · ${r.lotId})`);
       }
-      targetState.importedRowsByKey[r.sku] = r;
+      targetState.importedRowsByKey[rowKey] = r;
 
       if (r.rowOutcome === 'IMPORTED_WITH_OPENING_BALANCE' && r.qtyPhysical > 0) {
         newMovements.push(
           Object.freeze({
-            movementId: `MOV-OB-${analysis.batchCodePreview}-${r.sku}`,
+            movementId: `MOV-OB-${analysis.batchCodePreview}-${r.sku}-${r.ownerId}-${r.lotId}`,
             batchCode: analysis.batchCodePreview,
             createdAt: nowIso,
             lotId: `${r.lotId}-${r.sku}`,

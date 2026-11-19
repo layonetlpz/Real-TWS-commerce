@@ -75,11 +75,12 @@ function formatCompactCop(val: number): string {
 }
 
 export const BusinessIntelligenceModule: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
 
-  const isOwnerRole = userProfile?.role === 'OWNER';
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const isOwnerRole = effectiveRole === 'OWNER';
   const enforcedOwnerScope =
     isOwnerRole && userProfile?.linkedOwnerId
       ? userProfile.linkedOwnerId
@@ -97,10 +98,12 @@ export const BusinessIntelligenceModule: React.FC = () => {
   >('ALL');
 
   useEffect(() => {
-    if (enforcedOwnerScope !== 'ALL' && filters.ownerId !== enforcedOwnerScope) {
-      setFilters((prev) => ({ ...prev, ownerId: enforcedOwnerScope }));
-    }
-  }, [enforcedOwnerScope, filters.ownerId]);
+    setFilters((prev) =>
+      prev.ownerId === enforcedOwnerScope
+        ? prev
+        : { ...prev, ownerId: enforcedOwnerScope }
+    );
+  }, [enforcedOwnerScope]);
 
   const snapshot = useMemo(() => buildBusinessIntelligenceReport(filters), [filters]);
 
@@ -495,7 +498,7 @@ export const BusinessIntelligenceModule: React.FC = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
               gap: '18px'
             }}
           >
@@ -546,9 +549,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={activeTimeSeries}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="label" stroke="#64748b" fontSize={11} />
-                      <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                      <XAxis dataKey="label" stroke="var(--rtw-chart-axis)" fontSize={11} />
+                      <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
                       <Tooltip formatter={(v: number) => formatCop(v)} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                       <Bar dataKey="netRevenueCop" name="Ingresos Netos" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -568,9 +571,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
               <div style={{ height: '270px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={snapshot.charts.costsBreakdown} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
-                    <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={11} width={140} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                    <XAxis type="number" stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
+                    <YAxis dataKey="category" type="category" stroke="var(--rtw-chart-axis)" fontSize={11} width={140} />
                     <Tooltip formatter={(v: number) => formatCop(v)} />
                     <Bar dataKey="amountCop" name="Monto COP" fill="#d97706" radius={[0, 4, 4, 0]} />
                   </BarChart>
@@ -624,9 +627,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={snapshot.charts.profitEvolution}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="label" stroke="#64748b" fontSize={11} />
-                      <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                      <XAxis dataKey="label" stroke="var(--rtw-chart-axis)" fontSize={11} />
+                      <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
                       <Tooltip formatter={(v: number) => formatCop(v)} />
                       <Area
                         type="monotone"
@@ -653,7 +656,7 @@ export const BusinessIntelligenceModule: React.FC = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
               gap: '18px'
             }}
           >
@@ -667,9 +670,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
               <div style={{ height: '270px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={snapshot.charts.salesByOwner}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="ownerName" stroke="#64748b" fontSize={11} />
-                    <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                    <XAxis dataKey="ownerName" stroke="var(--rtw-chart-axis)" fontSize={11} />
+                    <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
                     <Tooltip formatter={(v: number) => formatCop(v)} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Bar dataKey="netSalesCop" name="Ventas Netas" fill="#10b981" />
@@ -690,9 +693,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
               <div style={{ height: '270px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={snapshot.charts.inventoryByOwner}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="ownerName" stroke="#64748b" fontSize={11} />
-                    <YAxis stroke="#64748b" fontSize={11} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                    <XAxis dataKey="ownerName" stroke="var(--rtw-chart-axis)" fontSize={11} />
+                    <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} />
                     <Tooltip />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Bar dataKey="available" stackId="inv" name="Disponible" fill="#10b981" />
@@ -765,7 +768,7 @@ export const BusinessIntelligenceModule: React.FC = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
               gap: '18px'
             }}
           >
@@ -782,9 +785,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={snapshot.charts.salesBySku}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="label" stroke="#64748b" fontSize={10} />
-                      <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                      <XAxis dataKey="label" stroke="var(--rtw-chart-axis)" fontSize={10} />
+                      <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
                       <Tooltip formatter={(v: number) => formatCop(v)} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                       <Bar dataKey="netRevenueCop" name="Ingresos Netos" fill="#10b981" />
@@ -803,9 +806,9 @@ export const BusinessIntelligenceModule: React.FC = () => {
               <div style={{ height: '270px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={snapshot.charts.channelPerformance}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="channelLabel" stroke="#64748b" fontSize={11} />
-                    <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatCompactCop} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                    <XAxis dataKey="channelLabel" stroke="var(--rtw-chart-axis)" fontSize={11} />
+                    <YAxis stroke="var(--rtw-chart-axis)" fontSize={11} tickFormatter={formatCompactCop} />
                     <Tooltip formatter={(v: number) => formatCop(v)} />
                     <Bar dataKey="netRevenueCop" name="Ingresos Netos COP" fill="#7c3aed" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -1019,7 +1022,7 @@ export const BusinessIntelligenceModule: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))',
                 gap: '12px'
               }}
             >

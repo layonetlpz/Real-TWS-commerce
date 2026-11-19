@@ -24,7 +24,7 @@ import {
   type RealCatalogMerchItem
 } from '../../services/brandMerchandisingService';
 import {
-  getOrInitializeOwnerMarketingConsent,
+  readOwnerMarketingConsent,
   registerOwnerMarketingConsent
 } from '../../services/creativeStudioService';
 import {
@@ -82,10 +82,13 @@ function formatDateTimeCO(iso: string | null): string {
 export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = ({
   initialTab = 'MARKETPLACE_ASSISTED'
 }) => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
 
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canWriteMarketing =
+    effectiveRole === 'ADMIN' || effectiveRole === 'MARKETING_OPERATOR';
   const actorName = userProfile?.fullName || userProfile?.email || 'Operador Marketing REAL TWS';
 
   const [activeTab, setActiveTab] = useState<SocialMarketplaceTab>(initialTab);
@@ -107,7 +110,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
 
   const availableOwnersForSku = useMemo(() => {
     if (!selectedItem || selectedItem.ownerAllocations.length === 0) {
-      return [{ ownerId: 'OWN-0001', ownerName: 'Eberto (Propietario Inicial)', qtyAvailable: 0 }];
+      return [];
     }
     return selectedItem.ownerAllocations;
   }, [selectedItem]);
@@ -127,18 +130,18 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
 
   const currentOwnerName = useMemo(() => {
     const found = availableOwnersForSku.find((o) => o.ownerId === selectedOwnerId);
-    return found ? found.ownerName : 'Eberto';
+    return found ? found.ownerName : selectedOwnerId;
   }, [availableOwnersForSku, selectedOwnerId]);
 
   const currentConsent = useMemo(() => {
     if (!selectedItem) return null;
-    return getOrInitializeOwnerMarketingConsent(
+    return readOwnerMarketingConsent(
       selectedOwnerId,
       currentOwnerName,
       selectedItem.sku,
       selectedItem.productName
     );
-  }, [selectedItem, selectedOwnerId, currentOwnerName, refreshTick]);
+  }, [selectedItem, selectedOwnerId, currentOwnerName, distState]);
 
   // Estados de Formulario de Marketplace y Calendario
   const [discountPct, setDiscountPct] = useState<number>(0);
@@ -199,9 +202,18 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
     ]
   );
 
-  // Filtrado del Calendario por Día, Semana o Mes
+  // Filtrado del Calendario por Día, Semana (Lunes-Domingo exacto de 7 días) o Mes
   const filteredCalendarPublications = useMemo(() => {
-    const refDate = new Date(`${calendarReferenceDate}T00:00:00`);
+    const refDate = new Date(`${calendarReferenceDate}T12:00:00`);
+    const dayOfWeek = refDate.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const weekStart = new Date(refDate);
+    weekStart.setDate(refDate.getDate() + diffToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
     return distState.calendarPublications.filter((pub) => {
       const pubDateStr = pub.scheduledFor.slice(0, 10);
       if (calendarViewMode === 'DAILY') {
@@ -210,15 +222,21 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
       if (calendarViewMode === 'MONTHLY') {
         return pubDateStr.slice(0, 7) === calendarReferenceDate.slice(0, 7);
       }
-      // WEEKLY (±3 días alrededor de la fecha de referencia o mismos 7 días)
-      const pubDate = new Date(`${pubDateStr}T00:00:00`);
-      const diffDays = Math.abs((pubDate.getTime() - refDate.getTime()) / (1000 * 3600 * 24));
-      return diffDays <= 7;
+      const pubDate = new Date(`${pubDateStr}T12:00:00`);
+      return pubDate.getTime() >= weekStart.getTime() && pubDate.getTime() <= weekEnd.getTime();
     });
   }, [distState.calendarPublications, calendarViewMode, calendarReferenceDate]);
 
   // Handlers
+  const denyMarketingWrite = () => {
+    notify('error', 'Permiso denegado', `El rol ${effectiveRole} tiene acceso de solo lectura en Distribución Social y Marketplace.`);
+  };
+
   const handleQuickGrantOwnerConsent = () => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     if (!selectedItem) return;
     registerOwnerMarketingConsent({
       ownerId: selectedOwnerId,
@@ -246,6 +264,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handlePrepareMarketplaceListing = () => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     if (!selectedItem) return;
     try {
       const created = prepareMarketplaceAssistedListing({
@@ -277,6 +299,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
     listingId: string,
     newStatus: 'approved_for_manual_post' | 'rejected'
   ) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     try {
       const updated = updateMarketplaceListingStatus({
         listingId,
@@ -298,6 +324,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handleSaveMarketplacePublishedUrl = (listingId: string) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     const url = marketplaceUrlInputs[listingId] || '';
     try {
       const updated = recordPublishedMarketplaceUrl({
@@ -322,6 +352,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handleScheduleCalendarPost = () => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     if (!selectedItem) return;
     try {
       const created = createOrScheduleCalendarPublication({
@@ -351,6 +385,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handleApproveCalendarPost = (publicationId: string) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     try {
       const updated = approveSocialCalendarPublication({
         publicationId,
@@ -373,12 +411,16 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handleRejectCalendarPost = (publicationId: string) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     try {
       const updated = rejectSocialCalendarPublication({
         publicationId,
         actorName,
         rejectionReason:
-          rejectionReasonDraft || 'Rechazado en control editorial antes de publicar.'
+          rejectionReasonDraft || 'Rechazada en control editorial antes de publicar.'
       });
       setSelectedPubForPreview(updated);
       setRejectionReasonDraft('');
@@ -394,6 +436,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   };
 
   const handlePublishApprovedPost = (publicationId: string) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     try {
       const published = publishApprovedPostToChannel({
         publicationId,
@@ -419,6 +465,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
   const handleConnectOAuthAdapter = (
     platform: 'facebook_graph_api' | 'instagram_graph_api'
   ) => {
+    if (!canWriteMarketing) {
+      denyMarketingWrite();
+      return;
+    }
     try {
       const updated = connectOfficialSocialGraphAdapter({
         platform,
@@ -718,7 +768,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
               gap: '1.4rem'
             }}
           >
@@ -727,7 +777,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
               <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.35rem' }}>
                 Preparación de Publicación para Marketplace (Asistencia Manual)
               </h2>
-              <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: '1rem' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
                 Genera títulos, descripciones verificadas, imagen cuadrada 1:1 con sello REAL TWS, precio aprobado, categoría, ubicación y enlace de contacto <code>wa.me</code> sin usar bots ni automatización no autorizada.
               </p>
 
@@ -784,7 +834,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 Asistente de Publicación Manual y Registro de URL
               </h3>
               {!selectedListingForHistory && distState.marketplaceListings.length === 0 ? (
-                <div style={{ color: '#6B7280', fontSize: '0.85rem', padding: '1rem 0' }}>
+                <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.85rem', padding: '1rem 0' }}>
                   Prepare una ficha en el panel izquierdo para habilitar los botones de copia rápida (Título, Precio, Categoría, Ubicación, Descripción, Imagen PNG) y el registro de la URL publicada.
                 </div>
               ) : (
@@ -877,10 +927,10 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                         }}
                       >
                         <div
-                          style={{ borderRadius: '0.45rem', overflow: 'hidden', border: '1px solid #D1D5DB' }}
+                          style={{ borderRadius: '0.45rem', overflow: 'hidden', border: '1px solid var(--rtw-border-light)' }}
                           dangerouslySetInnerHTML={{ __html: activeListing.composedSvgMarkup }}
                         />
-                        <div style={{ fontSize: '0.78rem', color: '#374151' }}>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--rtw-text-secondary)' }}>
                           <div>
                             <strong>Categoría:</strong> {activeListing.categoryLabel}
                           </div>
@@ -895,7 +945,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                             style={{
                               marginTop: '0.4rem',
                               padding: '0.5rem',
-                              background: '#F9FAFB',
+                              background: 'var(--rtw-bg-subtle)',
                               borderRadius: '0.35rem',
                               whiteSpace: 'pre-wrap',
                               fontFamily: 'inherit',
@@ -920,7 +970,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
               Historial de Publicaciones en Marketplace y Registro de URL Publicada
             </h3>
             {distState.marketplaceListings.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.85rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.85rem' }}>
                 Aún no hay fichas de Marketplace registradas.
               </div>
             ) : (
@@ -1075,7 +1125,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
               gap: '1.4rem'
             }}
           >
@@ -1084,7 +1134,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
               <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.35rem' }}>
                 Programar Contenido en el Calendario Editorial
               </h2>
-              <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: '1rem' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
                 Toda publicación ingresa en estado <code>pending_approval</code>, valida huellas anti-duplicados y exige aprobación humana explícita antes de publicarse.
               </p>
 
@@ -1161,7 +1211,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 Vista Previa de Publicación (Instagram / Facebook) y Aprobación
               </h3>
               {!selectedPubForPreview && distState.calendarPublications.length === 0 ? (
-                <div style={{ color: '#6B7280', fontSize: '0.85rem', padding: '1rem 0' }}>
+                <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.85rem', padding: '1rem 0' }}>
                   Programe o seleccione una publicación del calendario para inspeccionar su vista previa visual, aprobarla o despacharla al canal.
                 </div>
               ) : (
@@ -1202,7 +1252,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                           style={{
                             borderRadius: '0.5rem',
                             overflow: 'hidden',
-                            border: '1px solid #D1D5DB'
+                            border: '1px solid var(--rtw-border-light)'
                           }}
                           dangerouslySetInnerHTML={{ __html: pub.composedSvgMarkup }}
                         />
@@ -1216,7 +1266,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                           </div>
                           <pre
                             style={{
-                              background: '#F9FAFB',
+                              background: 'var(--rtw-bg-subtle)',
                               padding: '0.55rem',
                               borderRadius: '0.35rem',
                               whiteSpace: 'pre-wrap',
@@ -1273,7 +1323,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                           flexWrap: 'wrap',
                           alignItems: 'center',
                           paddingTop: '0.4rem',
-                          borderTop: '1px solid #E5E7EB'
+                          borderTop: '1px solid var(--rtw-border-light)'
                         }}
                       >
                         {pub.approvalStatus === 'pending_approval' && (
@@ -1358,7 +1408,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 <h3 style={{ fontSize: '1.08rem', fontWeight: 800, margin: 0 }}>
                   Calendario Editorial Integrado ({calendarViewMode === 'DAILY' ? 'Vista Diaria' : calendarViewMode === 'WEEKLY' ? 'Vista Semanal' : 'Vista Mensual'})
                 </h3>
-                <span style={{ fontSize: '0.8rem', color: '#6B7280' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                   Mostrando {filteredCalendarPublications.length} de{' '}
                   {distState.calendarPublications.length} publicaciones registradas.
                 </span>
@@ -1397,7 +1447,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
             </div>
 
             {filteredCalendarPublications.length === 0 ? (
-              <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6B7280' }}>
+              <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--rtw-text-muted)' }}>
                 No hay publicaciones programadas en este rango ({calendarViewMode}).
               </div>
             ) : (
@@ -1526,7 +1576,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
               gap: '1.4rem'
             }}
           >
@@ -1546,14 +1596,14 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                     color:
                       distState.connections.facebook_graph_api.connectionStatus === 'oauth_connected'
                         ? '#10B981'
-                        : '#6B7280'
+                        : 'var(--rtw-text-muted)'
                   }}
                 >
                   {distState.connections.facebook_graph_api.connectionStatus}
                 </span>
               </div>
 
-              <p style={{ fontSize: '0.81rem', color: '#6B7280', marginTop: '0.4rem' }}>
+              <p style={{ fontSize: '0.81rem', color: 'var(--rtw-text-muted)', marginTop: '0.4rem' }}>
                 Integración separada mediante OAuth 2.0 y Page Access Token almacenado en servidor (<code>{distState.connections.facebook_graph_api.secretVaultKeyName}</code>). Jamás solicita contraseñas ni utiliza automatización de navegador.
               </p>
 
@@ -1577,7 +1627,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 />
               </div>
 
-              <div style={{ fontSize: '0.78rem', color: '#374151', marginBottom: '0.9rem' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--rtw-text-secondary)', marginBottom: '0.9rem' }}>
                 <div>
                   <strong>Permisos OAuth Autorizados:</strong>{' '}
                   {distState.connections.facebook_graph_api.scopesGranted.join(', ')}
@@ -1626,14 +1676,14 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                     color:
                       distState.connections.instagram_graph_api.connectionStatus === 'oauth_connected'
                         ? '#10B981'
-                        : '#6B7280'
+                        : 'var(--rtw-text-muted)'
                   }}
                 >
                   {distState.connections.instagram_graph_api.connectionStatus}
                 </span>
               </div>
 
-              <p style={{ fontSize: '0.81rem', color: '#6B7280', marginTop: '0.4rem' }}>
+              <p style={{ fontSize: '0.81rem', color: 'var(--rtw-text-muted)', marginTop: '0.4rem' }}>
                 Exige cuenta profesional elegible (Business o Creator) vinculada. Token resguardado en Vault (<code>{distState.connections.instagram_graph_api.secretVaultKeyName}</code>) y control de límite de 25 publicaciones por cada 24h.
               </p>
 
@@ -1668,7 +1718,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 </label>
               </div>
 
-              <div style={{ fontSize: '0.78rem', color: '#374151', marginBottom: '0.9rem' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--rtw-text-secondary)', marginBottom: '0.9rem' }}>
                 <div>
                   <strong>Permisos OAuth Autorizados:</strong>{' '}
                   {distState.connections.instagram_graph_api.scopesGranted.join(', ')}
@@ -1719,7 +1769,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
                   Seguridad OAuth, Costo $0 y Suite de Verificación Sin Publicar en Redes Reales
                 </h3>
-                <p style={{ fontSize: '0.81rem', color: '#6B7280', marginTop: '0.25rem' }}>
+                <p style={{ fontSize: '0.81rem', color: 'var(--rtw-text-muted)', marginTop: '0.25rem' }}>
                   No se contratan gestores externos de redes sociales pagos. Durante las pruebas, el interruptor de seguridad garantiza cero envíos hacia redes externas.
                 </p>
               </div>
@@ -1771,7 +1821,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                     <div style={{ fontWeight: 800, fontSize: '0.84rem', color: res.passed ? '#065F46' : '#991B1B' }}>
                       {res.passed ? '✓ APROBADA: ' : '✗ FALLÓ: '} {res.testName}
                     </div>
-                    <div style={{ fontSize: '0.77rem', color: '#374151', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.77rem', color: 'var(--rtw-text-secondary)', marginTop: '0.25rem' }}>
                       {res.detail}
                     </div>
                   </div>
@@ -1801,7 +1851,7 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>
                   Preparador de Imágenes Verticales (9:16) y Textos para Estados de WhatsApp
                 </h2>
-                <p style={{ fontSize: '0.82rem', color: '#6B7280', marginTop: '0.25rem' }}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginTop: '0.25rem' }}>
                   Prepara piezas verticales 1080×1920 px y textos con enlace directo <code>wa.me</code> para compartir manualmente en WhatsApp Status y WhatsApp Business.
                 </p>
               </div>
@@ -1819,14 +1869,14 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
           </div>
 
           {distState.whatsappStatusItems.length === 0 ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center', color: '#6B7280' }}>
+            <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--rtw-text-muted)' }}>
               Pulse el botón superior para generar una tarjeta de Estado de WhatsApp 9:16 con texto comercial validado.
             </div>
           ) : (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
                 gap: '1.25rem'
               }}
             >
@@ -1862,14 +1912,14 @@ export const SocialMarketplaceModule: React.FC<SocialMarketplaceModuleProps> = (
                       margin: '0 auto 0.85rem auto',
                       borderRadius: '0.5rem',
                       overflow: 'hidden',
-                      border: '1px solid #D1D5DB'
+                      border: '1px solid var(--rtw-border-light)'
                     }}
                     dangerouslySetInnerHTML={{ __html: wa.composedVerticalSvg9x16 }}
                   />
 
                   <pre
                     style={{
-                      background: '#F9FAFB',
+                      background: 'var(--rtw-bg-subtle)',
                       padding: '0.65rem',
                       borderRadius: '0.4rem',
                       fontSize: '0.77rem',

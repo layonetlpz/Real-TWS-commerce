@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 
 export type StatTone = 'default' | 'success' | 'warning' | 'danger' | 'gold';
 
@@ -22,29 +22,29 @@ const TONE_VALUE_COLOR: Record<StatTone, string> = {
 
 const TONE_ICON_BG: Record<StatTone, { bg: string; color: string; border: string }> = {
   default: {
-    bg: 'rgba(15, 23, 42, 0.05)',
-    color: '#334155',
-    border: 'rgba(15, 23, 42, 0.08)'
+    bg: 'var(--color-surface-inset)',
+    color: 'var(--rtw-text-secondary)',
+    border: 'var(--rtw-border-light)'
   },
   success: {
-    bg: 'rgba(34, 197, 94, 0.12)',
-    color: '#15803d',
-    border: 'rgba(34, 197, 94, 0.24)'
+    bg: 'var(--rtw-success-bg)',
+    color: 'var(--rtw-success-text)',
+    border: 'var(--rtw-success-border)'
   },
   warning: {
-    bg: 'rgba(217, 119, 6, 0.12)',
-    color: '#92400e',
-    border: 'rgba(217, 119, 6, 0.24)'
+    bg: 'var(--rtw-warning-bg)',
+    color: 'var(--rtw-warning-text)',
+    border: 'var(--rtw-warning-border)'
   },
   danger: {
-    bg: 'rgba(239, 68, 68, 0.12)',
-    color: '#b91c1c',
-    border: 'rgba(239, 68, 68, 0.24)'
+    bg: 'var(--rtw-danger-bg)',
+    color: 'var(--rtw-danger-text)',
+    border: 'var(--rtw-danger-border)'
   },
   gold: {
-    bg: 'rgba(212, 175, 55, 0.16)',
-    color: '#846205',
-    border: 'rgba(212, 175, 55, 0.32)'
+    bg: 'var(--rtw-gold-soft)',
+    color: 'var(--rtw-gold-ink)',
+    border: 'var(--rtw-gold-border)'
   }
 };
 
@@ -64,14 +64,25 @@ export function StatCard({
     e.currentTarget.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
   };
 
+  const handleKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (!onClick) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
     <article
       className={`rtw-kpi-card rtw-glass-interactive ${
         staggerIndex ? `rtw-stagger-${staggerIndex}` : ''
       }`}
       style={{ cursor: onClick ? 'pointer' : undefined }}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       onMouseMove={handleMouseMove}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
     >
       <div className="rtw-stat-top">
         <span className="rtw-kpi-label">{label}</span>

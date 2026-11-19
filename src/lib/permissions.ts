@@ -9,6 +9,15 @@ export interface RoleMetadata {
   scopeRule: string;
 }
 
+export const ALL_USER_ROLES: UserRole[] = [
+  'ADMIN',
+  'INVENTORY_OPERATOR',
+  'SALES_OPERATOR',
+  'MARKETING_OPERATOR',
+  'OWNER',
+  'VIEWER'
+];
+
 export const ROLES_CATALOG: Record<UserRole, RoleMetadata> = {
   ADMIN: {
     role: 'ADMIN',
@@ -54,6 +63,15 @@ export const ROLES_CATALOG: Record<UserRole, RoleMetadata> = {
       'Acceso exclusivamente de lectura a sus propios lotes, movimientos, ventas atribuidas, gastos asignados, acuerdos y liquidaciones cuando se le habilita.',
     rlsHelperFunction: 'public.fn_can_owner_view(owner_id)',
     scopeRule: 'Exclusivamente registros propios (linked_owner_id = owner_id AND owner_portal_enabled = true)'
+  },
+  VIEWER: {
+    role: 'VIEWER',
+    label: 'Observador de Solo Lectura (VIEWER)',
+    shortBadge: 'LECTURA',
+    description:
+      'Acceso de solo lectura limitado a perfil propio y catálogo público autorizado, sin permisos de escritura ni acceso a costos o liquidaciones.',
+    rlsHelperFunction: "public.fn_has_any_role(ARRAY['VIEWER'])",
+    scopeRule: 'Solo lectura de catálogo autorizado y perfil propio (sin mutaciones)'
   }
 };
 
@@ -76,7 +94,7 @@ export const ROUTE_PERMISSIONS: Record<string, RoutePermissionRule> = {
   '/operaciones/productos': {
     path: '/operaciones/productos',
     moduleId: 'productos',
-    allowedReadRoles: ['ADMIN', 'INVENTORY_OPERATOR', 'SALES_OPERATOR', 'MARKETING_OPERATOR', 'OWNER'],
+    allowedReadRoles: ['ADMIN', 'INVENTORY_OPERATOR', 'SALES_OPERATOR', 'MARKETING_OPERATOR', 'OWNER', 'VIEWER'],
     allowedWriteRoles: ['ADMIN', 'INVENTORY_OPERATOR'],
     ownerScopedOnlyForOwnerRole: false
   },
@@ -239,7 +257,7 @@ export const ROUTE_PERMISSIONS: Record<string, RoutePermissionRule> = {
     moduleId: 'usuarios',
     // Todos los usuarios autenticados pueden entrar a ver su propio Perfil de Seguridad;
     // solo ADMIN puede gestionar cuentas y roles de terceros.
-    allowedReadRoles: ['ADMIN', 'INVENTORY_OPERATOR', 'SALES_OPERATOR', 'MARKETING_OPERATOR', 'OWNER'],
+    allowedReadRoles: ['ADMIN', 'INVENTORY_OPERATOR', 'SALES_OPERATOR', 'MARKETING_OPERATOR', 'OWNER', 'VIEWER'],
     allowedWriteRoles: ['ADMIN'],
     ownerScopedOnlyForOwnerRole: true
   },
@@ -526,6 +544,13 @@ export function evaluateSensitiveOperation(
             ? 'Operación de marketing autorizada.'
             : `El rol ${profile.role} no tiene permisos de escritura en marketing.`,
         dbLayerCheck: 'public.fn_can_manage_marketing()'
+      };
+
+    default:
+      return {
+        allowed: false,
+        reason: `Operación sensible no reconocida (${String(operation)}). Denegada por defecto.`,
+        dbLayerCheck: 'Fail-closed RBAC default guard'
       };
   }
 }

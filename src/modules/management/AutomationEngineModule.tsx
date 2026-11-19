@@ -46,14 +46,16 @@ function formatDateTimeCO(iso: string | null): string {
 }
 
 export const AutomationEngineModule: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { notify } = useNotifications();
 
-  const actorName = userProfile?.fullName || userProfile?.email || 'Orquestador REAL TWS';
-  const actorRole = userProfile?.role || 'ADMIN';
+  const actorName = userProfile?.fullName || userProfile?.email || 'Usuario Sistema';
+  const actorRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canAdminAutomation = actorRole === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<AutomationTabId>('RULES_AND_CONDITIONS');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [draftThresholds, setDraftThresholds] = useState<Record<string, string>>({});
 
   const autoState = useMemo(() => getAutomationEngineState(), [refreshTick]);
   const catalogItems = useMemo(() => getRealCatalogMerchItems(), [refreshTick]);
@@ -75,6 +77,10 @@ export const AutomationEngineModule: React.FC = () => {
   const [testResults, setTestResults] = useState<AutomationVerificationTestResult[] | null>(null);
 
   const handleToggleRule = (ruleCode: string, currentEnabled: boolean) => {
+    if (!canAdminAutomation) {
+      notify('error', 'Permiso denegado', `El rol ${actorRole} no puede modificar reglas de automatización.`);
+      return;
+    }
     try {
       const updated = updateAutomationRuleConfig({
         ruleCode,
@@ -96,31 +102,47 @@ export const AutomationEngineModule: React.FC = () => {
     }
   };
 
-  const handleUpdateRuleThreshold = (ruleCode: string, newThreshold: number) => {
+  const handleCommitRuleThreshold = (ruleCode: string, rawValue: string | undefined) => {
+    if (!canAdminAutomation) {
+      notify('error', 'Permiso denegado', `El rol ${actorRole} no puede modificar umbrales.`);
+      return;
+    }
+    const rule = autoState.rules.find((r) => r.ruleCode === ruleCode);
+    if (!rule) return;
+    const parsed = Math.max(1, Math.round(Number(rawValue ?? rule.conditions.lowStockThresholdUnits) || 1));
+    setDraftThresholds((prev) => {
+      const next = { ...prev };
+      delete next[ruleCode];
+      return next;
+    });
+    if (parsed === rule.conditions.lowStockThresholdUnits) return;
     try {
-      const rule = autoState.rules.find((r) => r.ruleCode === ruleCode);
-      if (!rule) return;
       updateAutomationRuleConfig({
         ruleCode,
         isEnabled: rule.isEnabled,
-        lowStockThresholdUnits: newThreshold,
+        lowStockThresholdUnits: parsed,
         actorRole
       });
       setRefreshTick((t) => t + 1);
-      notify('info', 'Condición Actualizada', `Umbral de stock ajustado a ${newThreshold} uds.`);
+      notify('info', 'Condición Actualizada', `Umbral de stock ajustado a ${parsed} uds.`);
     } catch (err: unknown) {
       notify('error', 'Error', err instanceof Error ? err.message : 'Error');
     }
   };
 
   const handleDispatchEvent = () => {
+    if (!canAdminAutomation) {
+      notify('error', 'Permiso denegado', `El rol ${actorRole} no puede disparar eventos manuales.`);
+      return;
+    }
     try {
+      const resolvedSku = selectedSku || catalogItems[0]?.sku || '';
       const res = dispatchAutomationEvent({
         idempotencyKey: idempotencyKeyInput,
         eventType: selectedEventType,
         referenceEntity: 'manual_trigger',
         referenceId: referenceIdInput,
-        sku: selectedSku,
+        sku: resolvedSku,
         ownerId: selectedOwnerId,
         actorName,
         actorRole,
@@ -232,7 +254,7 @@ export const AutomationEngineModule: React.FC = () => {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.35rem' }}>
               Consola de Disparo de Eventos con Clave de Idempotencia (<code>idempotency_key</code>)
             </h2>
-            <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               Prueba el despacho de cualquiera de los 14 eventos oficiales. Si envías dos veces la misma <code>idempotency_key</code>, el motor bloqueará inmediatamente la segunda ejecución sin duplicar efectos.
             </p>
 
@@ -335,6 +357,7 @@ export const AutomationEngineModule: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-primary"
+                disabled={!canAdminAutomation}
                 onClick={handleDispatchEvent}
                 style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
               >
@@ -381,7 +404,7 @@ export const AutomationEngineModule: React.FC = () => {
                       </td>
                       <td>
                         <strong>{rule.eventLabel}</strong>
-                        <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: '0.15rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)', marginTop: '0.15rem' }}>
                           {rule.description}
                         </div>
                       </td>
@@ -413,13 +436,28 @@ export const AutomationEngineModule: React.FC = () => {
                           max={50}
                           className="form-input"
                           style={{ width: '75px', padding: '0.25rem 0.45rem', fontSize: '0.78rem' }}
-                          value={rule.conditions.lowStockThresholdUnits}
-                          onChange={(e) =>
-                            handleUpdateRuleThreshold(
-                              rule.ruleCode,
-                              Math.max(1, Number(e.target.value) || 1)
-                            )
+                          disabled={!canAdminAutomation}
+                          value={
+                            draftThresholds[rule.ruleCode] ??
+                            String(rule.conditions.lowStockThresholdUnits)
                           }
+                          onChange={(e) =>
+                            setDraftThresholds((prev) => ({
+                              ...prev,
+                              [rule.ruleCode]: e.target.value
+                            }))
+                          }
+                          onBlur={(e) =>
+                            handleCommitRuleThreshold(rule.ruleCode, e.target.value)
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleCommitRuleThreshold(
+                                rule.ruleCode,
+                                (e.target as HTMLInputElement).value
+                              );
+                            }
+                          }}
                         />
                       </td>
                       <td style={{ fontSize: '0.78rem' }}>
@@ -430,6 +468,7 @@ export const AutomationEngineModule: React.FC = () => {
                           type="button"
                           className={rule.isEnabled ? 'btn btn-primary' : 'btn btn-secondary'}
                           style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}
+                          disabled={!canAdminAutomation}
                           onClick={() => handleToggleRule(rule.ruleCode, rule.isEnabled)}
                         >
                           {rule.isEnabled ? '✓ Activa (Desactivar)' : 'Inactiva (Activar)'}
@@ -455,7 +494,7 @@ export const AutomationEngineModule: React.FC = () => {
               Cola de Eventos Procesados, Estado de Jobs, Idempotencia y Reintentos
             </h2>
             {autoState.queue.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.84rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.84rem' }}>
                 La cola aún no tiene jobs registrados. Dispare un evento en la Pestaña 1.
               </div>
             ) : (
@@ -524,7 +563,7 @@ export const AutomationEngineModule: React.FC = () => {
               Salidas Generadas por las 7 Acciones Internas ({autoState.generatedArtifacts.length})
             </h3>
             {autoState.generatedArtifacts.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.84rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.84rem' }}>
                 Aún no se han generado proyecciones, alertas, borradores o reportes automáticos.
               </div>
             ) : (
@@ -541,8 +580,8 @@ export const AutomationEngineModule: React.FC = () => {
                     style={{
                       padding: '0.85rem',
                       borderRadius: '0.45rem',
-                      border: '1px solid #E5E7EB',
-                      background: '#F9FAFB'
+                      border: '1px solid var(--rtw-border-light)',
+                      background: 'var(--rtw-bg-subtle)'
                     }}
                   >
                     <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#9A7409' }}>
@@ -551,7 +590,7 @@ export const AutomationEngineModule: React.FC = () => {
                     <div style={{ fontWeight: 800, fontSize: '0.86rem', margin: '0.2rem 0' }}>
                       {art.title}
                     </div>
-                    <div style={{ fontSize: '0.78rem', color: '#4B5563' }}>{art.detail}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--rtw-text-secondary)' }}>{art.detail}</div>
                   </div>
                 ))}
               </div>
@@ -618,7 +657,7 @@ export const AutomationEngineModule: React.FC = () => {
               Audit Trail y Logs Inmutables de Ejecución ({autoState.logs.length})
             </h3>
             {autoState.logs.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.84rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.84rem' }}>
                 Sin logs registrados aún.
               </div>
             ) : (
@@ -682,7 +721,7 @@ export const AutomationEngineModule: React.FC = () => {
               <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>
                 Batería Automatizada de Pruebas del Automation Engine (Sandbox Aislado)
               </h2>
-              <p style={{ fontSize: '0.82rem', color: '#6B7280', marginTop: '0.25rem' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginTop: '0.25rem' }}>
                 Verifica los 14 eventos oficiales, rechazo de doble ejecución (idempotency), fallo transitorio con recuperación, detención de fallo permanente, permisos RBAC y cero duplicación de movimientos económicos o de stock.
               </p>
             </div>
@@ -698,7 +737,7 @@ export const AutomationEngineModule: React.FC = () => {
           </div>
 
           {!testResults ? (
-            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6B7280' }}>
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--rtw-text-muted)' }}>
               Pulse el botón superior para ejecutar la verificación integral en sandbox aislado.
             </div>
           ) : (
@@ -727,7 +766,7 @@ export const AutomationEngineModule: React.FC = () => {
                     <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>
                       {res.title} — {res.passed ? 'APROBADA' : 'FALLÓ'}
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#374151', marginTop: '0.2rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)', marginTop: '0.2rem' }}>
                       {res.details}
                     </div>
                   </div>

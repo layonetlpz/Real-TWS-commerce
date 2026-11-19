@@ -271,6 +271,34 @@ export function getOwnerConsentKey(ownerId: string, sku: string): string {
   return `${ownerId.trim().toUpperCase()}__${sku.trim().toUpperCase()}`;
 }
 
+export function readOwnerMarketingConsent(
+  ownerId: string,
+  ownerName: string,
+  sku: string,
+  productName: string
+): OwnerMarketingConsentRecord {
+  const state = getCreativeStudioState();
+  const key = getOwnerConsentKey(ownerId, sku);
+  if (state.consents[key]) {
+    return state.consents[key];
+  }
+  return {
+    id: `CNS-PENDING-${key}`,
+    consentCode: 'AUT-MKT-PEND',
+    ownerId,
+    ownerName,
+    sku,
+    productName,
+    status: 'pending_consent',
+    authorizedChannels: ['marketplace', 'facebook', 'instagram', 'whatsapp'],
+    maxAuthorizedDiscountPct: 0,
+    consentNotes: 'Pendiente de registrar consentimiento comercial del propietario antes de promocionar.',
+    grantedBy: null,
+    grantedAt: null,
+    updatedAt: ''
+  };
+}
+
 export function getOrInitializeOwnerMarketingConsent(
   ownerId: string,
   ownerName: string,
@@ -375,7 +403,8 @@ export function validateCreativeCompliance(input: {
 
   const item = input.catalogItem;
   const ownerAlloc = item.ownerAllocations.find((a) => a.ownerId === input.ownerId);
-  const ownerAvailableStock = ownerAlloc ? ownerAlloc.qtyAvailable : item.qtyAvailableTotal;
+  const ownerAvailableStock = ownerAlloc ? ownerAlloc.qtyAvailable : 0;
+  const ownerPendingInspection = ownerAlloc ? ownerAlloc.qtyPendingInspection : 0;
 
   // 1. Validación de Precio Aprobado
   const hasApprovedPrice =
@@ -393,7 +422,7 @@ export function validateCreativeCompliance(input: {
     blockingErrors.push(priceApprovedCheck.message);
   }
 
-  // 2. Validación de Stock Disponible Real
+  // 2. Validación de Stock Disponible Real (excluye defectuoso, reservado y pendiente de inspección)
   const hasStock = ownerAvailableStock > 0;
   const stockAvailableCheck = hasStock
     ? {
@@ -402,16 +431,19 @@ export function validateCreativeCompliance(input: {
       }
     : {
         passed: false,
-        message: `BLOQUEO: El SKU ${item.sku} tiene 0 unidades disponibles para ${input.ownerId}. Prohibido generar piezas de disponibilidad sin stock.`
+        message:
+          ownerPendingInspection > 0
+            ? `BLOQUEO: El SKU ${item.sku} para ${input.ownerId} tiene ${ownerPendingInspection} unidad(es) en revisión técnica (qty_pending_inspection) y 0 disponibles aptas.`
+            : `BLOQUEO: El SKU ${item.sku} tiene 0 unidades disponibles para ${input.ownerId}. Prohibido generar piezas de disponibilidad sin stock.`
       };
   if (!stockAvailableCheck.passed) {
     blockingErrors.push(stockAvailableCheck.message);
   }
 
   // 3. Validación de Consentimiento Comercial del Propietario
-  const consent = getOrInitializeOwnerMarketingConsent(
+  const consent = readOwnerMarketingConsent(
     input.ownerId,
-    ownerAlloc?.ownerName || 'Eberto',
+    ownerAlloc?.ownerName || input.ownerId,
     item.sku,
     item.productName
   );
@@ -882,10 +914,15 @@ export function renderCreativeStudioComposedSvg(input: {
     copyBundle.callsToAction[composerSettings.selectedCtaIndex] || copyBundle.callsToAction[0];
 
   const priceFormatted = formatCOP(copyBundle.effectivePriceCop);
-  const photoSource =
+  const rawPhotoSource =
     composerSettings.originalProductPhotoDataUrl ||
     item.approvedPhotos[0] ||
     null;
+  const photoSource =
+    rawPhotoSource &&
+    !/^\s*(data:image\/svg\+xml|javascript:)/i.test(rawPhotoSource)
+      ? rawPhotoSource
+      : null;
 
   // Coordenadas adaptables según formato 1:1, 4:5 o 9:16
   const photoBoxY = 195;
@@ -914,7 +951,7 @@ export function renderCreativeStudioComposedSvg(input: {
         <text x="${w / 2}" y="${photoBoxY + photoBoxHeight / 2 + 108}" text-anchor="middle" fill="${textSecondary}" font-family="JetBrains Mono, monospace" font-size="18" font-weight="600">Variante: ${escapeXml(item.variantOrColor)} • Producto Original Intacto</text>
       </g>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="100%">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">
     <defs>
       <linearGradient id="csGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#F3E5AB"/>
@@ -998,7 +1035,7 @@ export function recordCreativeEngineExecutionAudit(input: {
 }): { effectiveModeUsed: CreativeEngineMode; notice: string } {
   const state = getCreativeStudioState();
   const cfg = state.aiAdapterConfig;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toLocaleDateString('en-CA');
 
   if (cfg.lastResetDate !== today) {
     cfg.dailyQuotaUsed = 0;

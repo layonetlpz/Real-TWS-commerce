@@ -1,6 +1,6 @@
 // =============================================================================
 // REAL TWS COMMERCE SYSTEM — TIPOS TYPESCRIPT DEL ESQUEMA SUPABASE
-// Alineado con migraciones 0001..0022.
+// Alineado con migraciones 0001..0023 y REAL_TWS_MASTER_DATABASE_CORREGIDO.sql
 // =============================================================================
 
 export type AppRoleDb =
@@ -38,6 +38,10 @@ export type Database = {
           id: string;
           internal_code: string;
           full_name: string;
+          document_type: string | null;
+          document_number: string | null;
+          phone: string | null;
+          email: string | null;
           status: string;
           portal_access_enabled: boolean;
           notes: string | null;
@@ -49,7 +53,8 @@ export type Database = {
           internal_code: string;
           full_name: string;
         };
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['owners']['Row']>;
+        Relationships: [];
       };
       business_settings: {
         Row: {
@@ -69,7 +74,8 @@ export type Database = {
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['business_settings']['Row']>;
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['business_settings']['Row']>;
+        Relationships: [];
       };
       categories: {
         Row: {
@@ -85,17 +91,20 @@ export type Database = {
           code: string;
           name: string;
         };
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['categories']['Row']>;
+        Relationships: [];
       };
       lot_owner_allocations: {
         Row: {
           id: string;
           allocation_code: string;
           lot_id: string;
+          variant_id: string;
           sku: string;
           owner_id: string;
-          qty_initial_assigned: number;
-          qty_physical: number;
+          storage_bin: string;
+          qty_initial_assigned: number | null;
+          qty_physical: number | null;
           qty_good: number;
           qty_defective: number;
           qty_pending_inspection: number;
@@ -103,20 +112,77 @@ export type Database = {
           qty_available: number;
           purchase_unit_cost_cop: number | null;
           inbound_shipping_unit_cost_cop: number;
+          other_unit_cost_cop: number;
           effective_unit_cost_cop: number | null;
+          is_bonus_zero_cost: boolean;
+          reconciliation_state: string;
+          notes: string | null;
+          created_at: string;
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['lot_owner_allocations']['Row']>;
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['lot_owner_allocations']['Row']>;
+        Relationships: [];
+      };
+      inventory_incidences: {
+        Row: {
+          id: string;
+          severity: 'ALTA' | 'MEDIA' | 'INFO';
+          affected_module: string;
+          sku_or_owner_ref: string;
+          owner_id: string | null;
+          description: string;
+          required_action: string;
+          status: 'Pendiente Revisión' | 'En Proceso' | 'Resuelto';
+          resolved_at: string | null;
+          resolved_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['inventory_incidences']['Row']> & {
+          id: string;
+          severity: 'ALTA' | 'MEDIA' | 'INFO';
+          affected_module: string;
+          sku_or_owner_ref: string;
+          description: string;
+          required_action: string;
+        };
+        Update: Partial<Database['public']['Tables']['inventory_incidences']['Row']>;
+        Relationships: [];
+      };
+      audit_logs: {
+        Row: {
+          id: string;
+          audit_seq: number;
+          actor_user_id: string | null;
+          actor_role: string | null;
+          action_type: string;
+          table_name: string;
+          record_pk: string;
+          owner_id_affected: string | null;
+          previous_data: Record<string, unknown> | null;
+          new_data: Record<string, unknown> | null;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['audit_logs']['Row']> & {
+          action_type: string;
+          table_name: string;
+          record_pk: string;
+        };
+        Update: Partial<Database['public']['Tables']['audit_logs']['Row']>;
+        Relationships: [];
       };
       sales_orders: {
         Row: {
           id: string;
           order_number: string;
           order_date: string;
-          customer_id: string;
+          customer_id: string | null;
+          lead_id: string | null;
           sales_channel: string;
-          status: string;
+          allocation_policy_used: string;
+          order_status: string;
           payment_status: string;
           shipping_charged_cop: number;
           shipping_real_cost_cop: number;
@@ -124,7 +190,8 @@ export type Database = {
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['sales_orders']['Row']>;
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['sales_orders']['Row']>;
+        Relationships: [];
       };
       notifications: {
         Row: {
@@ -146,7 +213,8 @@ export type Database = {
           title: string;
           message: string;
         };
-                Relationships: [];
+        Update: Partial<Database['public']['Tables']['notifications']['Row']>;
+        Relationships: [];
       };
     };
     Views: {
@@ -171,10 +239,28 @@ export type Database = {
       v_owner_financial_pnl: {
         Row: {
           owner_id: string;
+          internal_code: string;
           owner_name: string;
+          owner_status: string;
+          agreement_status: string;
+          distribution_model: string | null;
+          associated_skus: number;
+          physical_units: number;
+          available_units: number;
+          pending_inspection_units: number;
+          net_units_sold: number;
+          gross_sales_cop: number;
+          discounts_cop: number;
+          returns_cop: number;
           net_sales_cop: number;
-          cogs_cop: number;
-          attributable_profit_cop: number;
+          total_cogs_cop: number;
+          gross_profit_cop: number;
+          allocated_direct_expenses_cop: number;
+          allocated_shared_expenses_cop: number;
+          store_commission_cop: number;
+          net_attributable_profit_cop: number;
+          total_settled_cop: number;
+          pending_settlement_balance_cop: number;
         };
         Relationships: [];
       };
@@ -235,6 +321,7 @@ export type Database = {
           p_sku: string;
           p_owner_id: string;
           p_payload: Record<string, unknown>;
+          p_triggered_by?: string;
         };
         Returns: unknown;
       };

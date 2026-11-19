@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Megaphone,
   TrendingUp,
@@ -16,6 +16,7 @@ import {
   getRealCatalogMerchItems,
   type RealCatalogMerchItem
 } from '../../services/brandMerchandisingService';
+import { getInventoryPurchaseState } from '../../services/inventoryPurchaseService';
 import {
   getMetaAdsControlState,
   getDataSourceBadgeLabel,
@@ -59,11 +60,12 @@ function formatDateTimeCO(iso: string | null): string {
 }
 
 export const MetaAdsControlModule: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
 
   const actorName = userProfile?.fullName || userProfile?.email || 'Director Performance REAL TWS';
+  const canAdminMetaAds = activeEffectiveRole === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<MetaAdsTab>('DASHBOARD_AND_CAMPAIGNS');
   const [refreshTick, setRefreshTick] = useState(0);
@@ -80,16 +82,31 @@ export const MetaAdsControlModule: React.FC = () => {
     [catalogItems, selectedSku]
   );
 
+  const invOwners = useMemo(() => getInventoryPurchaseState().owners, [refreshTick]);
   const availableOwners = useMemo(() => {
-    if (!selectedCatalogItem || selectedCatalogItem.ownerAllocations.length === 0) {
-      return [{ ownerId: 'OWN-0001', ownerName: 'Eberto (Propietario Inicial)', qtyAvailable: 0 }];
+    if (selectedCatalogItem && selectedCatalogItem.ownerAllocations.length > 0) {
+      return selectedCatalogItem.ownerAllocations;
     }
-    return selectedCatalogItem.ownerAllocations;
-  }, [selectedCatalogItem]);
+    return invOwners
+      .filter((o) => o.status === 'active')
+      .map((o) => ({ ownerId: o.id, ownerName: o.fullName, qtyAvailable: 0 }));
+  }, [selectedCatalogItem, invOwners]);
 
-  const [selectedOwnerId, setSelectedOwnerId] = useState<string>(
-    selectedOwnerScope && selectedOwnerScope !== 'ALL' ? selectedOwnerScope : 'OWN-0001'
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>(() =>
+    selectedOwnerScope && selectedOwnerScope !== 'ALL'
+      ? selectedOwnerScope
+      : availableOwners[0]?.ownerId || ''
   );
+
+  useEffect(() => {
+    if (selectedOwnerScope && selectedOwnerScope !== 'ALL') {
+      setSelectedOwnerId(selectedOwnerScope);
+      return;
+    }
+    if (availableOwners.length > 0 && !availableOwners.some((o) => o.ownerId === selectedOwnerId)) {
+      setSelectedOwnerId(availableOwners[0].ownerId);
+    }
+  }, [availableOwners, selectedOwnerScope, selectedOwnerId]);
 
   // Formulario de Registro Manual de Campaña + Conjunto + Anuncio
   const [campaignNameDraft, setCampaignNameDraft] = useState<string>('');
@@ -110,7 +127,7 @@ export const MetaAdsControlModule: React.FC = () => {
   // Formulario de Registro de Métricas y Importación CSV
   const [selectedCampaignIdForMetrics, setSelectedCampaignIdForMetrics] = useState<string>('');
   const [metricDateDraft, setMetricDateDraft] = useState<string>(() =>
-    new Date().toISOString().slice(0, 10)
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())
   );
   const [impressionsDraft, setImpressionsDraft] = useState<number>(2800);
   const reachDraft = 2200;
@@ -230,7 +247,18 @@ export const MetaAdsControlModule: React.FC = () => {
   }, [performances]);
 
   // Handlers
+  const requireMetaAdsAdmin = (): boolean => {
+    if (canAdminMetaAds) return true;
+    notify(
+      'error',
+      'Acceso restringido (RBAC)',
+      'Solo ADMIN puede crear campañas, registrar métricas, importar CSV o asignar gasto publicitario.'
+    );
+    return false;
+  };
+
   const handleCreateManualCampaignBundle = () => {
+    if (!requireMetaAdsAdmin()) return;
     try {
       const created = registerManualMetaAdsCampaignBundle({
         campaignName:
@@ -271,6 +299,7 @@ export const MetaAdsControlModule: React.FC = () => {
     campaignId: string,
     targetStatus: 'paused' | 'approved_manual_launch'
   ) => {
+    if (!requireMetaAdsAdmin()) return;
     const reason =
       pauseReasonInputs[campaignId] ||
       (targetStatus === 'paused'
@@ -299,6 +328,7 @@ export const MetaAdsControlModule: React.FC = () => {
   };
 
   const handleRecordMetrics = () => {
+    if (!requireMetaAdsAdmin()) return;
     const targetId = selectedCampaignIdForMetrics || adsState.campaigns[0]?.id;
     if (!targetId) {
       notify('warning', 'Sin campaña', 'Primero registre o importe una campaña.');
@@ -333,6 +363,7 @@ export const MetaAdsControlModule: React.FC = () => {
   };
 
   const handleImportCsv = () => {
+    if (!requireMetaAdsAdmin()) return;
     try {
       const res = importAdsManagerCsvReport({
         csvContent: csvTextDraft,
@@ -377,10 +408,11 @@ export const MetaAdsControlModule: React.FC = () => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleRegisterOwnerSpendAllocation = () => {
+    if (!requireMetaAdsAdmin()) return;
     const targetId = selectedCampaignIdForAlloc || adsState.campaigns[0]?.id;
     if (!targetId) {
       notify('warning', 'Seleccione una campaña', 'Primero registre una campaña con gasto.');
@@ -576,7 +608,7 @@ export const MetaAdsControlModule: React.FC = () => {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))',
                   gap: '0.75rem'
                 }}
               >
@@ -604,14 +636,14 @@ export const MetaAdsControlModule: React.FC = () => {
                     <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>
                       {al.title} — {al.campaignCode} ({al.sku})
                     </div>
-                    <div style={{ fontSize: '0.79rem', color: '#374151', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.79rem', color: 'var(--rtw-text-secondary)', marginTop: '0.25rem' }}>
                       {al.message}
                     </div>
                     <div
                       style={{
                         fontSize: '0.75rem',
                         fontWeight: 700,
-                        color: '#111827',
+                        color: 'var(--rtw-text-primary)',
                         marginTop: '0.35rem'
                       }}
                     >
@@ -628,7 +660,7 @@ export const MetaAdsControlModule: React.FC = () => {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.35rem' }}>
               Registrar Nueva Campaña Manual (Campaña + Conjunto + Anuncio + SKU + Propietario)
             </h2>
-            <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               Registra manualmente la estructura publicitaria vinculada al SKU y al propietario de la mercancía promovida. El sistema jamás crea campañas ni gasta dinero por sí solo.
             </p>
 
@@ -763,6 +795,7 @@ export const MetaAdsControlModule: React.FC = () => {
             <button
               type="button"
               className="btn btn-primary"
+              disabled={!canAdminMetaAds}
               onClick={handleCreateManualCampaignBundle}
             >
               Registrar Campaña, Conjunto y Anuncio (Dato Manual)
@@ -775,7 +808,7 @@ export const MetaAdsControlModule: React.FC = () => {
               Matriz de Campañas, Presupuestos, Conversaciones vs. Compras, CPA, ROAS y Contribución
             </h3>
             {performances.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.85rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.85rem' }}>
                 No hay campañas registradas aún. Cree una arriba o importe el informe CSV en la Pestaña 2.
               </div>
             ) : (
@@ -827,13 +860,13 @@ export const MetaAdsControlModule: React.FC = () => {
                           </td>
                           <td>
                             <strong>{cmp.campaignName}</strong>
-                            <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)' }}>
                               Canal: {cmp.channel}
                             </div>
                           </td>
                           <td>
                             <strong>{cmp.promotedSku}</strong>
-                            <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)' }}>
                               {cmp.targetOwnerId} ({cmp.targetOwnerName})
                             </div>
                           </td>
@@ -845,7 +878,7 @@ export const MetaAdsControlModule: React.FC = () => {
                           </td>
                           <td>
                             <strong>{perf.totalWhatsappConversations} chats</strong>
-                            <div style={{ fontSize: '0.73rem', color: '#6B7280' }}>
+                            <div style={{ fontSize: '0.73rem', color: 'var(--rtw-text-muted)' }}>
                               {perf.costPerConversationCop
                                 ? `${formatCOP(perf.costPerConversationCop)} / chat`
                                 : '—'}
@@ -853,7 +886,7 @@ export const MetaAdsControlModule: React.FC = () => {
                           </td>
                           <td style={{ fontWeight: 800, color: '#059669' }}>
                             {perf.totalVerifiedPurchases} pedido(s)
-                            <div style={{ fontSize: '0.73rem', color: '#374151' }}>
+                            <div style={{ fontSize: '0.73rem', color: 'var(--rtw-text-secondary)' }}>
                               Ventas: {formatCOP(perf.totalAttributedRevenueCop)}
                             </div>
                           </td>
@@ -894,6 +927,7 @@ export const MetaAdsControlModule: React.FC = () => {
                                 <button
                                   type="button"
                                   className="btn btn-secondary"
+                                  disabled={!canAdminMetaAds}
                                   style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
                                   onClick={() => handleTogglePauseCampaign(cmp.id, 'paused')}
                                 >
@@ -904,6 +938,7 @@ export const MetaAdsControlModule: React.FC = () => {
                                 <button
                                   type="button"
                                   className="btn btn-primary"
+                                  disabled={!canAdminMetaAds}
                                   style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
                                   onClick={() =>
                                     handleTogglePauseCampaign(cmp.id, 'approved_manual_launch')
@@ -933,7 +968,7 @@ export const MetaAdsControlModule: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
             gap: '1.4rem'
           }}
         >
@@ -942,7 +977,7 @@ export const MetaAdsControlModule: React.FC = () => {
             <h2 style={{ fontSize: '1.08rem', fontWeight: 800, marginBottom: '0.35rem' }}>
               Registrar Resultados y Conversiones por Campaña
             </h2>
-            <p style={{ fontSize: '0.81rem', color: '#6B7280', marginBottom: '0.9rem' }}>
+            <p style={{ fontSize: '0.81rem', color: 'var(--rtw-text-muted)', marginBottom: '0.9rem' }}>
               Registra impresiones, clics, gasto, <strong>conversaciones iniciadas</strong> y <strong>compras reales verificadas</strong>. Recuerde: las conversaciones nunca se contabilizan como compras.
             </p>
 
@@ -988,7 +1023,7 @@ export const MetaAdsControlModule: React.FC = () => {
                   onChange={(e) => setDataSourceDraft(e.target.value as AdsDataSourceOrigin)}
                 >
                   <option value="MANUAL_ENTRY">Dato Manual (MANUAL_ENTRY)</option>
-                  <option value="META_API_SYNCED">Sincronizado Meta API (META_API_SYNCED)</option>
+                  <option value="CSV_ADS_MANAGER_IMPORT">Importado CSV Ads Manager</option>
                 </select>
               </div>
 
@@ -1049,7 +1084,12 @@ export const MetaAdsControlModule: React.FC = () => {
               </div>
             </div>
 
-            <button type="button" className="btn btn-primary" onClick={handleRecordMetrics}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canAdminMetaAds}
+              onClick={handleRecordMetrics}
+            >
               Guardar Registro de Métricas
             </button>
           </div>
@@ -1059,7 +1099,7 @@ export const MetaAdsControlModule: React.FC = () => {
             <h2 style={{ fontSize: '1.08rem', fontWeight: 800, marginBottom: '0.35rem' }}>
               Importar Informe CSV de Meta Ads Manager
             </h2>
-            <p style={{ fontSize: '0.81rem', color: '#6B7280', marginBottom: '0.85rem' }}>
+            <p style={{ fontSize: '0.81rem', color: 'var(--rtw-text-muted)', marginBottom: '0.85rem' }}>
               Sube o pega un informe CSV exportado de Ads Manager. Cada fila importada queda identificada como <code>Importado CSV Ads Manager</code> y relacionada con su SKU y Propietario.
             </p>
 
@@ -1069,6 +1109,7 @@ export const MetaAdsControlModule: React.FC = () => {
                 <input
                   type="file"
                   accept=".csv,text/csv"
+                  disabled={!canAdminMetaAds}
                   style={{ display: 'none' }}
                   onChange={handleUploadCsvFile}
                 />
@@ -1091,7 +1132,12 @@ export const MetaAdsControlModule: React.FC = () => {
               onChange={(e) => setCsvTextDraft(e.target.value)}
             />
 
-            <button type="button" className="btn btn-primary" onClick={handleImportCsv}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canAdminMetaAds}
+              onClick={handleImportCsv}
+            >
               Procesar e Importar Informe CSV de Ads Manager
             </button>
           </div>
@@ -1126,7 +1172,7 @@ export const MetaAdsControlModule: React.FC = () => {
                 <tbody>
                   {profitabilityBySku.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', color: '#6B7280' }}>
+                      <td colSpan={9} style={{ textAlign: 'center', color: 'var(--rtw-text-muted)' }}>
                         Sin métricas registradas.
                       </td>
                     </tr>
@@ -1165,7 +1211,7 @@ export const MetaAdsControlModule: React.FC = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
               gap: '1.4rem'
             }}
           >
@@ -1188,7 +1234,7 @@ export const MetaAdsControlModule: React.FC = () => {
                   <tbody>
                     {profitabilityByOwnerAndChannel.length === 0 ? (
                       <tr>
-                        <td colSpan={6} style={{ textAlign: 'center', color: '#6B7280' }}>
+                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--rtw-text-muted)' }}>
                           Sin datos.
                         </td>
                       </tr>
@@ -1226,7 +1272,7 @@ export const MetaAdsControlModule: React.FC = () => {
                   Atribución Multipropietario del Gasto Publicitario
                 </h3>
               </div>
-              <p style={{ fontSize: '0.8rem', color: '#6B7280', marginBottom: '0.85rem' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)', marginBottom: '0.85rem' }}>
                 Regla Crítica: Nunca se descuenta publicidad de un propietario sin su autorización explícita y sin que su acuerdo comercial esté configurado y activo.
               </p>
 
@@ -1286,11 +1332,73 @@ export const MetaAdsControlModule: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-primary"
+                disabled={!canAdminMetaAds}
                 onClick={handleRegisterOwnerSpendAllocation}
               >
                 Registrar Atribución Publicitaria
               </button>
             </div>
+          </div>
+
+          {/* Tabla de Atribuciones Multipropietario Registradas */}
+          <div className="card" style={{ padding: '1.35rem' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: '0.75rem' }}>
+              Registro de Atribuciones Publicitarias Multipropietario ({adsState.ownerSpendAllocations.length})
+            </h3>
+            {adsState.ownerSpendAllocations.length === 0 ? (
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.83rem' }}>
+                Aún no se han registrado atribuciones de gasto publicitario a propietarios.
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Campaña / SKU</th>
+                      <th>Propietario</th>
+                      <th>Política</th>
+                      <th>Gasto Asignado</th>
+                      <th>Estado Deducción</th>
+                      <th>Autorizado Por</th>
+                      <th>Notas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adsState.ownerSpendAllocations.map((al) => (
+                      <tr key={al.id}>
+                        <td style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
+                          {al.allocationCode}
+                        </td>
+                        <td>
+                          {al.campaignCode} • {al.sku}
+                        </td>
+                        <td>
+                          {al.ownerId} ({al.ownerName})
+                        </td>
+                        <td>{al.allocationPolicyUsed}</td>
+                        <td style={{ fontWeight: 700 }}>{formatCOP(al.ownerAllocatedSpendCop)}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              al.deductionStatus === 'authorized_and_applied'
+                                ? 'badge-success'
+                                : al.deductionStatus === 'store_absorbed_no_deduction'
+                                  ? 'badge-info'
+                                  : 'badge-warning'
+                            }`}
+                          >
+                            {al.deductionStatus}
+                          </span>
+                        </td>
+                        <td>{al.authorizedBy || 'Pendiente'}</td>
+                        <td>{al.notes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1307,7 +1415,7 @@ export const MetaAdsControlModule: React.FC = () => {
                 Adaptador Oficial Meta Marketing API (Preparado y Desactivado Inicialmente)
               </h2>
             </div>
-            <p style={{ fontSize: '0.83rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.83rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               Preparado con secretos exclusivamente en servidor (<code>{adsState.futureApiAdapter.secretVaultKeyName}</code>) y permisos oficiales de lectura (<code>ads_read</code>, <code>read_insights</code>). Mantiene bloqueados por arquitectura la creación automática de campañas, el gasto de dinero y la modificación de presupuestos.
             </p>
 
@@ -1351,7 +1459,7 @@ export const MetaAdsControlModule: React.FC = () => {
               Historial Inmutable de Campañas, Importaciones CSV y Asignaciones ({adsState.historyLog.length})
             </h3>
             {adsState.historyLog.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '0.83rem' }}>
+              <div style={{ color: 'var(--rtw-text-muted)', fontSize: '0.83rem' }}>
                 Sin eventos registrados aún.
               </div>
             ) : (

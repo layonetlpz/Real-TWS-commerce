@@ -36,7 +36,7 @@ export function DataTable<T>({
 
   useEffect(() => {
     setPage(1);
-  }, [data.length, sortKey, sortDir]);
+  }, [data, sortKey, sortDir]);
 
   const sortedData = useMemo(() => {
     if (!sortKey) return data;
@@ -113,9 +113,17 @@ export function DataTable<T>({
               {columns.map((col) => {
                 const isSortable = Boolean(col.sortValue);
                 const isSorted = sortKey === col.key;
+                const ariaSort: 'ascending' | 'descending' | 'none' | undefined = isSortable
+                  ? isSorted
+                    ? sortDir === 'asc'
+                      ? 'ascending'
+                      : 'descending'
+                    : 'none'
+                  : undefined;
                 return (
                   <th
                     key={col.key}
+                    aria-sort={ariaSort}
                     style={{ textAlign: col.align ?? 'left' }}
                   >
                     {isSortable ? (
@@ -199,10 +207,17 @@ export function DataTable<T>({
                       fontSize: '0.82rem'
                     }}
                   >
-                    <span style={{ color: 'var(--rtw-text-muted)', fontWeight: 600 }}>
+                    <span style={{ color: 'var(--rtw-text-muted)', fontWeight: 600, flexShrink: 0 }}>
                       {col.header}
                     </span>
-                    <span style={{ textAlign: 'right', fontWeight: 500 }}>
+                    <span
+                      style={{
+                        textAlign: 'right',
+                        fontWeight: 500,
+                        minWidth: 0,
+                        overflowWrap: 'anywhere'
+                      }}
+                    >
                       {col.render(row)}
                     </span>
                   </div>

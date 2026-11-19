@@ -21,6 +21,11 @@ import {
   type NormalizedImportRow,
   type CostStatusType
 } from './excelImportEngine';
+import {
+  isValidNonNegativeAmount,
+  isValidNonNegativeInt,
+  isValidPositiveInt
+} from '../utils/validations';
 
 export interface ProductVariantCatalogItem {
   productId: string;
@@ -380,8 +385,13 @@ function buildStateFromImportedRows(
 
     // Create initial lot allocation for non-historical-sold items if not already created
     if (r.rowOutcome !== 'CATALOG_ONLY_HISTORICAL_SOLD') {
-      const allocId = `ALLOC-INI-${r.sku}-${r.ownerId}`;
-      const alreadyExists = allocations.some((a) => a.id === allocId);
+      const allocId = `ALLOC-INI-${r.sku}-${r.ownerId}-${r.lotId}`;
+      const expectedLotId = `${r.lotId}-${r.sku}`;
+      const alreadyExists = allocations.some(
+        (a) =>
+          a.id === allocId ||
+          (a.sku === r.sku && a.ownerId === r.ownerId && a.lotId === expectedLotId)
+      );
       if (!alreadyExists) {
         const recState: ReconciliationState =
           r.costStatus === 'PENDING_COST'
@@ -426,12 +436,13 @@ function buildStateFromImportedRows(
         });
 
         if (r.qtyPhysical > 0) {
-          const obIdempKey = `IDEMP-OB-${r.sku}-${r.ownerId}`;
-          if (!processedKeys.has(obIdempKey)) {
+          const obIdempKey = `IDEMP-OB-${r.sku}-${r.ownerId}-${r.lotId}`;
+          const legacyObKey = `IDEMP-OB-${r.sku}-${r.ownerId}`;
+          if (!processedKeys.has(obIdempKey) && !processedKeys.has(legacyObKey)) {
             processedKeys.add(obIdempKey);
             movements.push(
               Object.freeze({
-                id: `MOV-OB-${r.sku}`,
+                id: `MOV-OB-${r.sku}-${r.ownerId}-${r.lotId}`,
                 movementSeq: movements.length + 1,
                 idempotencyKey: obIdempKey,
                 createdAt: '2026-11-13T00:00:00.000Z',
@@ -463,8 +474,8 @@ function buildStateFromImportedRows(
             );
 
             inspections.push({
-              id: `QCI-INI-${r.sku}`,
-              inspectionCode: `QCI-INI-${r.sku}`,
+              id: `QCI-INI-${r.sku}-${r.ownerId}-${r.lotId}`,
+              inspectionCode: `QCI-INI-${r.sku}-${r.ownerId}`,
               idempotencyKey: `${obIdempKey}:QCI`,
               inspectionDate: '2026-11-13T00:00:00.000Z',
               lotAllocationId: allocId,
@@ -548,6 +559,45 @@ export async function ensureExcelBaselineLoadedInInventory(
   const synced = buildStateFromImportedRows(importState.importedRowsByKey, current);
   saveInventoryPurchaseState(synced);
   return synced;
+}
+
+export function syncOwnersIntoInventoryStore(
+  liveOwners: Array<{ id: string; fullName: string; status: 'active' | 'inactive' }>
+): InventoryPurchaseStoreState {
+  const current = getInventoryPurchaseState();
+  if (!liveOwners || liveOwners.length === 0) return current;
+
+  const byId = new Map<string, { id: string; fullName: string; status: 'active' | 'inactive' }>();
+  for (const existing of current.owners) {
+    byId.set(existing.id, existing);
+  }
+  for (const owner of liveOwners) {
+    if (!owner.id?.trim()) continue;
+    byId.set(owner.id.trim(), {
+      id: owner.id.trim(),
+      fullName: owner.fullName?.trim() || owner.id.trim(),
+      status: owner.status === 'inactive' ? 'inactive' : 'active'
+    });
+  }
+
+  const nextOwners = Array.from(byId.values());
+  const changed =
+    nextOwners.length !== current.owners.length ||
+    nextOwners.some(
+      (o, idx) =>
+        current.owners[idx]?.id !== o.id ||
+        current.owners[idx]?.fullName !== o.fullName ||
+        current.owners[idx]?.status !== o.status
+    );
+
+  if (!changed) return current;
+
+  const nextState: InventoryPurchaseStoreState = {
+    ...current,
+    owners: nextOwners
+  };
+  saveInventoryPurchaseState(nextState);
+  return nextState;
 }
 
 // ============================================================================
@@ -748,11 +798,14 @@ export function txCreatePurchaseOrder(
       throw new Error(`SKU "${line.sku}" no existe en el catálogo maestro.`);
     }
 
-    if (line.qtyOrdered <= 0) {
-      throw new Error(`Cantidad solicitada inválida en SKU ${line.sku}: debe ser > 0.`);
+    if (!isValidPositiveInt(line.qtyOrdered)) {
+      throw new Error(`Cantidad solicitada inválida en SKU ${line.sku}: debe ser entero > 0.`);
     }
-    if (line.unitPurchaseCostCop !== null && line.unitPurchaseCostCop < 0) {
-      throw new Error(`Costo unitario negativo no permitido en SKU ${line.sku}.`);
+    if (
+      line.unitPurchaseCostCop !== null &&
+      !isValidNonNegativeAmount(line.unitPurchaseCostCop)
+    ) {
+      throw new Error(`Costo unitario inválido o negativo en SKU ${line.sku}.`);
     }
 
     if (line.unitPurchaseCostCop !== null) {
@@ -861,12 +914,20 @@ export function txReceivePurchaseOrderLine(
   }
 
   if (
-    input.qtyReceivedNow <= 0 ||
-    input.qtyGood < 0 ||
-    input.qtyDefective < 0 ||
-    input.qtyPendingInspection < 0
+    !isValidPositiveInt(input.qtyReceivedNow) ||
+    !isValidNonNegativeInt(input.qtyGood) ||
+    !isValidNonNegativeInt(input.qtyDefective) ||
+    !isValidNonNegativeInt(input.qtyPendingInspection)
   ) {
-    throw new Error('Las cantidades recibidas deben ser positivas y los subtotales >= 0.');
+    throw new Error('Las cantidades recibidas deben ser enteros positivos y los subtotales >= 0.');
+  }
+
+  if (
+    input.unitPurchaseCostCop !== null &&
+    input.unitPurchaseCostCop !== undefined &&
+    !isValidNonNegativeAmount(input.unitPurchaseCostCop)
+  ) {
+    throw new Error('El costo unitario de compra debe ser un valor numérico válido >= 0.');
   }
 
   if (
@@ -882,11 +943,19 @@ export function txReceivePurchaseOrderLine(
   if (!order) {
     throw new Error(`No existe la orden de compra ${input.orderNumber}.`);
   }
+  if (order.status === 'cancelled') {
+    throw new Error(`La orden de compra ${input.orderNumber} está cancelada y no admite recepciones.`);
+  }
 
   const line = order.lines.find((l) => l.lineNumber === input.lineNumber);
   if (!line) {
     throw new Error(
       `No existe la línea #${input.lineNumber} en la orden ${input.orderNumber}.`
+    );
+  }
+  if (line.ownerId !== ownerId) {
+    throw new Error(
+      `CONFLICTO DE PROPIETARIO: La línea #${line.lineNumber} de ${input.orderNumber} pertenece a ${line.ownerId}, no a ${ownerId}.`
     );
   }
 
@@ -1075,11 +1144,11 @@ export function txInspectQualityAllocation(
   }
 
   if (
-    input.qtyToInspect <= 0 ||
-    input.qtyApprovedGood < 0 ||
-    input.qtyMarkedDefective < 0
+    !isValidPositiveInt(input.qtyToInspect) ||
+    !isValidNonNegativeInt(input.qtyApprovedGood) ||
+    !isValidNonNegativeInt(input.qtyMarkedDefective)
   ) {
-    throw new Error('Las cantidades de inspección deben ser válidas (> 0).');
+    throw new Error('Las cantidades de inspección deben ser enteros válidos (> 0).');
   }
 
   if (input.qtyApprovedGood + input.qtyMarkedDefective !== input.qtyToInspect) {
@@ -1214,8 +1283,8 @@ export function txReserveStock(
     throw new Error(`IDEMPOTENCIA BLOQUEADA: La reserva "${idempKey}" ya fue ejecutada.`);
   }
 
-  if (input.qtyToReserve <= 0) {
-    throw new Error('La cantidad a reservar debe ser mayor a cero.');
+  if (!isValidPositiveInt(input.qtyToReserve)) {
+    throw new Error('La cantidad a reservar debe ser un entero mayor a cero.');
   }
 
   const alloc = state.allocations.find((a) => a.id === input.lotAllocationId);
@@ -1334,7 +1403,7 @@ export function txReleaseStockReservation(
 
   const remainingReserved = res.qtyReserved - res.qtyFulfilled - res.qtyReleased;
   const qtyRelease = input.qtyToRelease ?? remainingReserved;
-  if (qtyRelease <= 0 || qtyRelease > remainingReserved) {
+  if (!isValidPositiveInt(qtyRelease) || qtyRelease > remainingReserved) {
     throw new Error(`Cantidad a liberar inválida (${qtyRelease}). Pendiente en reserva: ${remainingReserved}.`);
   }
 
@@ -1416,8 +1485,8 @@ export function txDispatchStock(
     );
   }
 
-  if (input.qtyToDispatch <= 0) {
-    throw new Error('La cantidad a despachar debe ser mayor a cero.');
+  if (!isValidPositiveInt(input.qtyToDispatch)) {
+    throw new Error('La cantidad a despachar debe ser un entero mayor a cero.');
   }
 
   const alloc = state.allocations.find((a) => a.id === input.lotAllocationId);
@@ -1534,8 +1603,8 @@ export function txProcessCustomerReturn(
     throw new Error(`IDEMPOTENCIA BLOQUEADA: La devolución "${idempKey}" ya fue procesada.`);
   }
 
-  if (input.qtyReturned <= 0) {
-    throw new Error('La cantidad devuelta debe ser mayor a cero.');
+  if (!isValidPositiveInt(input.qtyReturned)) {
+    throw new Error('La cantidad devuelta debe ser un entero mayor a cero.');
   }
 
   const alloc = state.allocations.find((a) => a.id === input.lotAllocationId);
@@ -1616,8 +1685,8 @@ export function txTransferOwnership(
     throw new Error(`IDEMPOTENCIA BLOQUEADA: La transferencia "${idempKey}" ya fue ejecutada.`);
   }
 
-  if (input.qtyToTransfer <= 0) {
-    throw new Error('La cantidad a transferir debe ser mayor a cero.');
+  if (!isValidPositiveInt(input.qtyToTransfer)) {
+    throw new Error('La cantidad a transferir debe ser un entero mayor a cero.');
   }
 
   if (!input.reason || input.reason.trim().length < 5) {
@@ -1818,6 +1887,18 @@ export function txRecordInventoryAdjustment(
     throw new Error('MOTIVO OBLIGATORIO: Todo ajuste de inventario requiere justificación documentada.');
   }
 
+  if (
+    !Number.isFinite(input.deltaGood) ||
+    !Number.isInteger(input.deltaGood) ||
+    !Number.isFinite(input.deltaDefective) ||
+    !Number.isInteger(input.deltaDefective) ||
+    !Number.isFinite(input.deltaPending) ||
+    !Number.isInteger(input.deltaPending) ||
+    (input.deltaGood === 0 && input.deltaDefective === 0 && input.deltaPending === 0)
+  ) {
+    throw new Error('Los deltas de ajuste deben ser enteros válidos y al menos uno distinto de cero.');
+  }
+
   const alloc = state.allocations.find((a) => a.id === input.lotAllocationId);
   if (!alloc) throw new Error('Asignación de lote no encontrada.');
 
@@ -1972,7 +2053,7 @@ export function buildInventoryReports(
 
   const bySku = Object.values(bySkuMap).map((x) => ({
     ...x,
-    ownersList: Array.from(x.owners).join(', ') || 'OWN-0001'
+    ownersList: Array.from(x.owners).join(', ') || 'Sin lote asignado'
   }));
 
   // 2. Reporte por Categoría

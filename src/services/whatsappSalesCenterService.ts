@@ -810,7 +810,8 @@ export function validateWhatsAppBuyerMessageSecurity(input: {
 // ============================================================================
 
 export function buildBuyerWaMeDeepLink(buyerPhone: string, messageText: string): string {
-  const digits = normalizeWhatsAppDigits(buyerPhone) || '573000000000';
+  const digits = normalizeWhatsAppDigits(buyerPhone);
+  if (!digits) return '';
   return `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
 }
 
@@ -828,6 +829,12 @@ export function prepareAndRecordWhatsAppInteraction(input: {
   linkedOrderId?: string | null;
   actorName: string;
 }): WhatsAppPreparedInteractionRecord {
+  const cleanPhone = input.buyerPhoneWhatsapp.trim();
+  const phoneNorm = normalizeWhatsAppDigits(cleanPhone);
+  if (!phoneNorm || phoneNorm.length < 7) {
+    throw new Error('Debe ingresar un número de WhatsApp válido (mínimo 7 dígitos) para generar el enlace wa.me.');
+  }
+
   const consultation = getWhatsAppCatalogConsultation(input.sku);
   const security = validateWhatsAppBuyerMessageSecurity({
     category: input.templateCategory,
@@ -845,18 +852,15 @@ export function prepareAndRecordWhatsAppInteraction(input: {
   const state = getWhatsAppSalesCenterState();
   const nextIdx = state.interactionsLog.length + 1;
   const nowIso = new Date().toISOString();
-  const waMeUrl = buildBuyerWaMeDeepLink(input.buyerPhoneWhatsapp, input.preparedBuyerMessage);
+  const waMeUrl = buildBuyerWaMeDeepLink(cleanPhone, input.preparedBuyerMessage);
 
-  const phoneNorm = normalizeWhatsAppDigits(input.buyerPhoneWhatsapp);
-  if (phoneNorm) {
-    state.contactPermissionsByPhone[phoneNorm] = input.contactPermissionGranted;
-  }
+  state.contactPermissionsByPhone[phoneNorm] = input.contactPermissionGranted;
 
   const record: WhatsAppPreparedInteractionRecord = {
     id: `WAINT-${Date.now()}-${nextIdx}`,
     interactionCode: `WA-2026-${String(nextIdx).padStart(4, '0')}`,
     buyerName: input.buyerName.trim() || 'Comprador WhatsApp',
-    buyerPhoneWhatsapp: input.buyerPhoneWhatsapp.trim() || '+57 300 000 0000',
+    buyerPhoneWhatsapp: cleanPhone,
     contactPermissionGranted: input.contactPermissionGranted,
     sku: input.sku,
     productName: consultation?.catalogItem.productName || input.sku,
@@ -969,9 +973,13 @@ export function createAssistedOrderFromWhatsApp(input: {
     );
   }
 
-  // Buscar cliente existente por teléfono o registrarlo sin duplicar
-  const crmState = getSalesOrdersCrmState();
+  // Validar nombre y teléfono antes de buscar/registrar cliente
+  const cleanName = input.buyerName.trim();
   const phoneNorm = normalizeWhatsAppDigits(input.buyerPhoneWhatsapp);
+  if (!cleanName || phoneNorm.length < 7) {
+    throw new Error('Debe indicar nombre y número de WhatsApp válido (mínimo 7 dígitos) para crear el pedido.');
+  }
+  const crmState = getSalesOrdersCrmState();
   let customer = crmState.customers.find(
     (c) => normalizeWhatsAppDigits(c.phoneWhatsapp) === phoneNorm
   );

@@ -1,8 +1,8 @@
-import { lazy, Suspense } from 'react';
+import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
-import { LoadingState } from '../components/StatusStates';
+import { ErrorState, LoadingState } from '../components/StatusStates';
 
 const DashboardModule = lazy(() =>
   import('../modules/dashboard/DashboardModule').then((m) => ({
@@ -80,12 +80,47 @@ const AuditModule = lazy(() =>
   }))
 );
 
-function RouteSuspender({ children }: { children: React.ReactNode }) {
+class RouteErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || 'Error al cargar el módulo.' };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    // Error capturado de forma controlada por el límite de ruta
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <ErrorState
+          message={`No se pudo renderizar este módulo: ${this.state.message}`}
+          onRetry={() => {
+            this.setState({ hasError: false, message: '' });
+            window.location.reload();
+          }}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function RouteSuspender({ children }: { children: ReactNode }) {
   return (
     <ProtectedRoute>
-      <Suspense fallback={<LoadingState label="Cargando módulo..." />}>
-        {children}
-      </Suspense>
+      <RouteErrorBoundary>
+        <Suspense fallback={<LoadingState label="Cargando módulo..." />}>
+          {children}
+        </Suspense>
+      </RouteErrorBoundary>
     </ProtectedRoute>
   );
 }

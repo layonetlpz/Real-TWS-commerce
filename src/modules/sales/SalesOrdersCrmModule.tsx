@@ -104,7 +104,7 @@ const ORDER_STATUS_LABELS: Record<SalesOrderRecord['status'], string> = {
 };
 
 export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmModuleProps) {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify: rawNotify } = useNotifications();
   const notify = (
@@ -120,8 +120,14 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
     getInventoryPurchaseState()
   );
 
-  // Protección de datos personales: oculto por defecto y bloqueado para rol OWNER
-  const isOwnerRole = userProfile?.role === 'OWNER';
+  // Protección de datos personales y control de escritura por rol efectivo
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const isOwnerRole = effectiveRole === 'OWNER';
+  const canWriteSales = effectiveRole === 'ADMIN' || effectiveRole === 'SALES_OPERATOR';
+  const canWriteDispatch =
+    effectiveRole === 'ADMIN' ||
+    effectiveRole === 'SALES_OPERATOR' ||
+    effectiveRole === 'INVENTORY_OPERATOR';
   const [revealPersonalData, setRevealPersonalData] = useState<boolean>(false);
 
   // Selector de pedido activo para la vista de Detalle y Rentabilidad
@@ -241,11 +247,16 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
 
   const selectedOrder = useMemo(
     () =>
-      salesState.orders.find((o) => o.id === selectedOrderId) ||
+      filteredOrders.find((o) => o.id === selectedOrderId) ||
       filteredOrders[0] ||
       null,
-    [salesState.orders, selectedOrderId, filteredOrders]
+    [selectedOrderId, filteredOrders]
   );
+
+  useEffect(() => {
+    setReturnAllocationId(selectedOrder?.lines[0]?.allocations[0]?.id ?? '');
+    setDispatchShippingCost(selectedOrder?.shippingRealCostCop ?? 0);
+  }, [selectedOrder?.id, selectedOrder?.shippingRealCostCop]);
 
   const selectedOrderProfitability = useMemo(() => {
     if (!selectedOrder) return null;
@@ -273,9 +284,17 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
 
   // Inicializar constructor de pedido nuevo
   const openNewOrderBuilder = (preselectedCustomerId?: string) => {
+    if (!canWriteSales) {
+      notify(`El rol ${effectiveRole} no puede crear pedidos.`, 'warning');
+      return;
+    }
     const defaultCust = preselectedCustomerId || salesState.customers[0]?.id || '';
     const firstLotAlloc =
-      invState.allocations.find((a) => a.qtyAvailable > 0) || invState.allocations[0];
+      invState.allocations.find(
+        (a) => a.qtyAvailable > 0 && a.costStatus !== 'PENDING_COST'
+      ) ||
+      invState.allocations.find((a) => a.qtyAvailable > 0) ||
+      invState.allocations[0];
     const defaultSku = firstLotAlloc?.sku || 'COM-PER-001-AZU';
     const catItem = invState.catalog[defaultSku];
 
@@ -290,7 +309,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {
         sku: defaultSku,
         qtyOrdered: 1,
-        unitSalePriceCop: catItem?.approvedSalePriceCop || 50000,
+        unitSalePriceCop: catItem?.approvedSalePriceCop ?? 0,
         lineDiscountCop: 0,
         allocations: firstLotAlloc
           ? [{ lotAllocationId: firstLotAlloc.id, qtyAllocated: 1 }]
@@ -302,6 +321,10 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
 
   // Abrir editor de un pedido aún NO confirmado ('draft' o 'reserved')
   const openEditUnconfirmedOrderBuilder = (order: SalesOrderRecord) => {
+    if (!canWriteSales) {
+      notify(`El rol ${effectiveRole} no puede editar pedidos.`, 'warning');
+      return;
+    }
     if (order.status !== 'draft' && order.status !== 'reserved') {
       notify(
         'Solo se pueden editar pedidos mientras no estén confirmados (borrador o reservado).',
@@ -332,7 +355,11 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
 
   const handleAddDraftLine = () => {
     const firstLotAlloc =
-      invState.allocations.find((a) => a.qtyAvailable > 0) || invState.allocations[0];
+      invState.allocations.find(
+        (a) => a.qtyAvailable > 0 && a.costStatus !== 'PENDING_COST'
+      ) ||
+      invState.allocations.find((a) => a.qtyAvailable > 0) ||
+      invState.allocations[0];
     const sku = firstLotAlloc?.sku || 'COM-PER-001-AZU';
     const cat = invState.catalog[sku];
     setDraftLines((prev) => [
@@ -340,7 +367,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {
         sku,
         qtyOrdered: 1,
-        unitSalePriceCop: cat?.approvedSalePriceCop || 45000,
+        unitSalePriceCop: cat?.approvedSalePriceCop ?? 0,
         lineDiscountCop: 0,
         allocations: firstLotAlloc
           ? [{ lotAllocationId: firstLotAlloc.id, qtyAllocated: 1 }]
@@ -360,7 +387,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
         return {
           ...line,
           sku: newSku,
-          unitSalePriceCop: cat?.approvedSalePriceCop || line.unitSalePriceCop || 45000,
+          unitSalePriceCop: cat?.approvedSalePriceCop ?? line.unitSalePriceCop ?? 0,
           allocations: preferredLot
             ? [{ lotAllocationId: preferredLot.id, qtyAllocated: line.qtyOrdered }]
             : []
@@ -370,10 +397,15 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
   };
 
   const handleSaveOrderFromBuilder = () => {
+    if (!canWriteSales) {
+      notify(`El rol ${effectiveRole} es de solo lectura.`, 'error');
+      return;
+    }
     try {
       if (editingOrderId) {
         const updated = txUpdateUnconfirmedSalesOrder({
           salesOrderId: editingOrderId,
+          salesChannel: orderChannel,
           shippingChargedCop: orderShippingCharged,
           shippingRealCostCop: orderShippingRealCost,
           notes: orderNotes,
@@ -425,8 +457,8 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
     }
   };
 
-  // KPIs de resumen comercial
-  const activeOrdersList = salesState.orders.filter((o) => o.status !== 'cancelled');
+  // KPIs de resumen comercial (respetan selectedOwnerScope)
+  const activeOrdersList = filteredOrders.filter((o) => o.status !== 'cancelled');
   const totalNetMerchandiseCop = activeOrdersList.reduce((acc, o) => {
     const p = calculateOrderProfitability(o.id, salesState);
     return acc + p.netMerchandiseRevenueCop;
@@ -444,6 +476,52 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
     return acc + p.pendingReceivableCop;
   }, 0);
 
+  const visibleTabs = [
+    ...(effectiveRole !== 'INVENTORY_OPERATOR'
+      ? [
+          {
+            id: 'ORDERS' as CommercialSectionTab,
+            label: 'Pedidos',
+            icon: <ShoppingBag size={14} />,
+            count: filteredOrders.length
+          }
+        ]
+      : []),
+    ...(canWriteSales
+      ? [
+          {
+            id: 'CUSTOMERS' as CommercialSectionTab,
+            label: 'Clientes',
+            icon: <UserCheck size={14} />,
+            count: salesState.customers.length
+          },
+          {
+            id: 'CRM_PIPELINE' as CommercialSectionTab,
+            label: 'CRM',
+            icon: <MessageSquareHeart size={14} />,
+            count: salesState.leads.length
+          }
+        ]
+      : []),
+    ...(canWriteDispatch
+      ? [
+          {
+            id: 'SHIPMENTS' as CommercialSectionTab,
+            label: 'Despachos',
+            icon: <PackageCheck size={14} />,
+            count: salesState.shipments.length
+          }
+        ]
+      : []),
+    ...(canWriteSales
+      ? [{ id: 'TESTS_9' as CommercialSectionTab, label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }]
+      : [])
+  ];
+
+  const effectiveTab = visibleTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : visibleTabs[0]?.id || 'ORDERS';
+
   return (
     <div className="module-container">
       {/* ENCABEZADO EJECUTIVO */}
@@ -451,10 +529,14 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
         variant="dark"
         eyebrow="COMERCIAL · VENTAS Y CRM"
         title="Pedidos, Clientes, CRM y Despachos"
-        subtitle="Gestiona tus ventas por lote y propietario, seguimiento de clientes y envíos."
+        subtitle={
+          isOwnerRole
+            ? 'Vista acotada de propietario (solo lectura) con datos personales ocultos.'
+            : 'Gestiona tus ventas por lote y propietario, seguimiento de clientes y envíos.'
+        }
         actions={
           <>
-            {!isOwnerRole && (
+            {!isOwnerRole && effectiveRole !== 'VIEWER' && (
               <button
                 type="button"
                 className="rtw-btn rtw-btn-ghost-dark btn-sm"
@@ -465,51 +547,27 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                 {revealPersonalData ? 'Ocultar datos' : 'Mostrar datos'}
               </button>
             )}
-            <button
-              type="button"
-              className="rtw-btn rtw-btn-gold btn-sm"
-              onClick={() => {
-                setActiveTab('ORDERS');
-                openNewOrderBuilder();
-              }}
-            >
-              <Plus size={15} />
-              Nuevo pedido
-            </button>
+            {canWriteSales && (
+              <button
+                type="button"
+                className="rtw-btn rtw-btn-gold btn-sm"
+                onClick={() => {
+                  setActiveTab('ORDERS');
+                  openNewOrderBuilder();
+                }}
+              >
+                <Plus size={15} />
+                Nuevo pedido
+              </button>
+            )}
           </>
         }
         bottomSlot={
           <SegmentedTabs<CommercialSectionTab>
             variant="dark"
-            value={activeTab}
+            value={effectiveTab}
             onChange={setActiveTab}
-            items={[
-              {
-                id: 'ORDERS',
-                label: 'Pedidos',
-                icon: <ShoppingBag size={14} />,
-                count: salesState.orders.length
-              },
-              {
-                id: 'CUSTOMERS',
-                label: 'Clientes',
-                icon: <UserCheck size={14} />,
-                count: salesState.customers.length
-              },
-              {
-                id: 'CRM_PIPELINE',
-                label: 'CRM',
-                icon: <MessageSquareHeart size={14} />,
-                count: salesState.leads.length
-              },
-              {
-                id: 'SHIPMENTS',
-                label: 'Despachos',
-                icon: <PackageCheck size={14} />,
-                count: salesState.shipments.length
-              },
-              { id: 'TESTS_9', label: 'Diagnóstico', icon: <ShieldCheck size={14} /> }
-            ]}
+            items={visibleTabs}
           />
         }
       />
@@ -897,7 +955,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                           >
                             {availableLotsForSku.map((lot) => (
                               <option key={lot.id} value={lot.id}>
-                                Propietario: {lot.ownerId} ({lot.ownerName}) | Lote: {lot.lotId} | Disponible: {lot.qtyAvailable} uds | Costo Unit: {formatCOP((lot.purchaseUnitCostCop ?? 0) + (lot.inboundShippingUnitCostCop ?? 0))}
+                                Propietario: {lot.ownerId} ({lot.ownerName}) | Lote: {lot.lotId} | Disponible: {lot.qtyAvailable} uds | Costo Unit: {lot.costStatus === 'PENDING_COST' || lot.purchaseUnitCostCop === null ? 'PENDING_COST' : formatCOP((lot.purchaseUnitCostCop ?? 0) + (lot.inboundShippingUnitCostCop ?? 0))}
                               </option>
                             ))}
                           </select>
@@ -927,11 +985,14 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             <span className="badge badge-neutral">
                               COGS:{' '}
-                              {formatCOP(
-                                ((selectedLotObj?.purchaseUnitCostCop ?? 0) +
-                                  (selectedLotObj?.inboundShippingUnitCostCop ?? 0)) *
-                                  alloc.qtyAllocated
-                              )}
+                              {selectedLotObj?.costStatus === 'PENDING_COST' ||
+                              selectedLotObj?.purchaseUnitCostCop === null
+                                ? 'PENDING_COST'
+                                : formatCOP(
+                                    ((selectedLotObj?.purchaseUnitCostCop ?? 0) +
+                                      (selectedLotObj?.inboundShippingUnitCostCop ?? 0)) *
+                                      alloc.qtyAllocated
+                                  )}
                             </span>
                             {line.allocations.length > 1 && (
                               <button
@@ -1011,11 +1072,11 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {/* ===================================================================== */}
       {/* TAB 1: PEDIDOS Y VISTA DETALLADA DE RENTABILIDAD                      */}
       {/* ===================================================================== */}
-      {activeTab === 'ORDERS' && (
+      {effectiveTab === 'ORDERS' && (
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))',
             gap: '1.25rem',
             alignItems: 'start'
           }}
@@ -1232,14 +1293,22 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                   </h2>
                   <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
                     Cliente: <strong>{selectedOrder.customerName}</strong> ({selectedOrder.customerCode}) •{' '}
-                    {maskProtectedPhone(selectedOrder.customerPhone, revealPersonalData && !isOwnerRole)} •{' '}
-                    {maskProtectedAddress(selectedOrder.customerAddress, revealPersonalData && !isOwnerRole)}
+                    {maskProtectedPhone(
+                      selectedOrder.customerPhone,
+                      revealPersonalData && !isOwnerRole && effectiveRole !== 'VIEWER'
+                    )}{' '}
+                    •{' '}
+                    {maskProtectedAddress(
+                      selectedOrder.customerAddress,
+                      revealPersonalData && !isOwnerRole && effectiveRole !== 'VIEWER'
+                    )}
                   </div>
                 </div>
 
                 {/* ACCIONES DEL FLUJO DEL PEDIDO */}
                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                  {(selectedOrder.status === 'draft' || selectedOrder.status === 'reserved') && (
+                  {canWriteSales &&
+                    (selectedOrder.status === 'draft' || selectedOrder.status === 'reserved') && (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -1249,7 +1318,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     </button>
                   )}
 
-                  {selectedOrder.status === 'draft' && (
+                  {canWriteSales && selectedOrder.status === 'draft' && (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -1267,7 +1336,8 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     </button>
                   )}
 
-                  {(selectedOrder.status === 'draft' || selectedOrder.status === 'reserved') && (
+                  {canWriteSales &&
+                    (selectedOrder.status === 'draft' || selectedOrder.status === 'reserved') && (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1288,7 +1358,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     </button>
                   )}
 
-                  {selectedOrder.status === 'confirmed' && (
+                  {canWriteDispatch && selectedOrder.status === 'confirmed' && (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1313,7 +1383,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     </button>
                   )}
 
-                  {selectedOrder.status === 'dispatched' && (
+                  {canWriteDispatch && selectedOrder.status === 'dispatched' && (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1610,6 +1680,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     <button
                       type="button"
                       className="btn btn-primary"
+                      disabled={!canWriteSales}
                       onClick={() => {
                         try {
                           const rec = txRegisterOrderPayment({
@@ -1688,20 +1759,23 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                       min={0}
                       className="form-control"
                       placeholder="Costo Real Guía (COP)..."
-                      value={dispatchShippingCost || ''}
-                      onChange={(e) => setDispatchShippingCost(Number(e.target.value) || 0)}
+                      value={dispatchShippingCost}
+                      disabled={!canWriteDispatch}
+                      onChange={(e) => setDispatchShippingCost(Math.max(0, Number(e.target.value) || 0))}
                     />
                     <input
                       type="text"
                       className="form-control"
                       placeholder="Novedad o nota de despacho..."
                       value={dispatchNotes}
+                      disabled={!canWriteDispatch}
                       onChange={(e) => setDispatchNotes(e.target.value)}
                     />
                     <button
                       type="button"
                       className="btn btn-primary"
                       disabled={
+                        !canWriteDispatch ||
                         selectedOrder.status === 'dispatched' ||
                         selectedOrder.status === 'delivered' ||
                         selectedOrder.status === 'cancelled'
@@ -1712,8 +1786,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                             salesOrderId: selectedOrder.id,
                             carrierName,
                             trackingNumber,
-                            shippingRealCostCop:
-                              dispatchShippingCost || selectedOrder.shippingRealCostCop,
+                            shippingRealCostCop: dispatchShippingCost,
                             actorName,
                             notes: dispatchNotes
                           });
@@ -1753,6 +1826,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     <div style={{ display: 'grid', gap: '0.45rem' }}>
                       <select
                         className="form-control"
+                        disabled={!canWriteDispatch}
                         value={
                           returnAllocationId ||
                           selectedOrder.lines[0]?.allocations[0]?.id ||
@@ -1773,11 +1847,13 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                         type="number"
                         min={1}
                         className="form-control"
+                        disabled={!canWriteDispatch}
                         value={returnQty}
                         onChange={(e) => setReturnQty(Math.max(1, Number(e.target.value) || 1))}
                       />
                       <select
                         className="form-control"
+                        disabled={!canWriteDispatch}
                         value={returnCondition}
                         onChange={(e) =>
                           setReturnCondition(
@@ -1795,6 +1871,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                       <input
                         type="text"
                         className="form-control"
+                        disabled={!canWriteDispatch}
                         placeholder="Motivo documentado de devolución..."
                         value={returnReason}
                         onChange={(e) => setReturnReason(e.target.value)}
@@ -1802,6 +1879,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                       <button
                         type="button"
                         className="btn btn-secondary"
+                        disabled={!canWriteDispatch}
                         onClick={() => {
                           try {
                             const targetId =
@@ -1838,6 +1916,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                       <input
                         type="text"
                         className="form-control"
+                        disabled={!canWriteSales}
                         placeholder="Motivo de cancelación..."
                         value={cancelReason}
                         onChange={(e) => setCancelReason(e.target.value)}
@@ -1845,7 +1924,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        disabled={selectedOrder.status === 'cancelled'}
+                        disabled={!canWriteSales || selectedOrder.status === 'cancelled'}
                         onClick={() => {
                           try {
                             const { releasedAllocationsCount } = txCancelSalesOrder({
@@ -1878,11 +1957,11 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {/* ===================================================================== */}
       {/* TAB 2: CLIENTES (ANTI-DUPLICADOS, PROTECCIÓN DE DATOS E HISTORIAL)    */}
       {/* ===================================================================== */}
-      {activeTab === 'CUSTOMERS' && (
+      {effectiveTab === 'CUSTOMERS' && (
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(390px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(390px, 100%), 1fr))',
             gap: '1.25rem',
             alignItems: 'start'
           }}
@@ -2202,12 +2281,12 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {/* ===================================================================== */}
       {/* TAB 3: PIPELINE CRM (PROSPECTOS, SEGUIMIENTO Y CONVERSIÓN)            */}
       {/* ===================================================================== */}
-      {activeTab === 'CRM_PIPELINE' && (
+      {effectiveTab === 'CRM_PIPELINE' && (
         <div>
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))',
               gap: '1.25rem',
               marginBottom: '1.25rem'
             }}
@@ -2420,6 +2499,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
                     <button
                       type="button"
                       className="btn btn-primary"
+                      disabled={!canWriteSales}
                       onClick={() => {
                         try {
                           const targetId = selectedLeadId || salesState.leads[0]?.id;
@@ -2561,7 +2641,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {/* ===================================================================== */}
       {/* TAB 4: DESPACHOS, ENVÍOS Y SEGUIMIENTO DE GUÍAS                       */}
       {/* ===================================================================== */}
-      {activeTab === 'SHIPMENTS' && (
+      {effectiveTab === 'SHIPMENTS' && (
         <div className="card">
           <div
             style={{
@@ -2655,7 +2735,7 @@ export function SalesOrdersCrmModule({ initialTab = 'ORDERS' }: SalesOrdersCrmMo
       {/* ===================================================================== */}
       {/* TAB 5: SUITE AUTOMATIZADA DE LAS 9 PRUEBAS OBLIGATORIAS               */}
       {/* ===================================================================== */}
-      {activeTab === 'TESTS_9' && (
+      {effectiveTab === 'TESTS_9' && (
         <div className="card">
           <div
             style={{

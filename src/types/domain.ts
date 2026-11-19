@@ -12,7 +12,8 @@ export type UserRole =
   | 'INVENTORY_OPERATOR'
   | 'SALES_OPERATOR'
   | 'MARKETING_OPERATOR'
-  | 'OWNER';
+  | 'OWNER'
+  | 'VIEWER';
 
 export type ModuleStatus = 'BASE_ACTIVA' | 'PENDIENTE_FASE_2' | 'PENDIENTE_FASE_3_8';
 

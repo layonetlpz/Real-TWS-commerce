@@ -29,16 +29,18 @@ BEGIN
 END
 $$;
 
--- 2. Prueba negativa: impedir mutación de libros inmutables (stock_movements / audit_logs)
+-- 2. Prueba negativa: impedir mutación de libros inmutables (audit_logs)
 DO $$
 DECLARE
   v_blocked BOOLEAN := false;
 BEGIN
-  INSERT INTO public.audit_logs (actor_email, action, entity_name, entity_id, detail)
-  VALUES ('qa@realtws.test', 'QA_TEST', 'audit_logs', 'TEST-1', '{}'::jsonb);
+  INSERT INTO public.audit_logs (actor_role, action_type, table_name, record_pk, new_data, reason)
+  VALUES ('ADMIN', 'QA_TEST', 'audit_logs', 'QA-TEST-1', '{}'::jsonb, 'Prueba de inmutabilidad QA');
 
   BEGIN
-    UPDATE public.audit_logs SET action = 'TAMPERED' WHERE entity_id = 'TEST-1';
+    UPDATE public.audit_logs
+    SET action_type = 'TAMPERED'
+    WHERE record_pk = 'QA-TEST-1';
   EXCEPTION WHEN OTHERS THEN
     v_blocked := true;
   END;
@@ -49,17 +51,25 @@ BEGIN
 END
 $$;
 
--- 3. Verificar existencia de buckets privados obligatorios
+-- 3. Verificar existencia de buckets privados y públicos obligatorios
 DO $$
 DECLARE
   v_count INTEGER;
 BEGIN
   SELECT COUNT(*) INTO v_count
   FROM storage.buckets
-  WHERE id IN ('product-originals', 'product-public', 'marketing-assets', 'invoices', 'owner-documents');
+  WHERE id IN (
+    'private-documents',
+    'public-catalog-media',
+    'product-originals',
+    'product-public',
+    'marketing-assets',
+    'invoices',
+    'owner-documents'
+  );
 
-  IF v_count < 5 THEN
-    RAISE EXCEPTION 'FALLO STORAGE: Faltan buckets obligatorios (encontrados: %/5).', v_count;
+  IF v_count < 7 THEN
+    RAISE EXCEPTION 'FALLO STORAGE: Faltan buckets obligatorios (encontrados: %/7).', v_count;
   END IF;
 END
 $$;

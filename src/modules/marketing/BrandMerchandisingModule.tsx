@@ -34,6 +34,7 @@ import { formatCOP } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import { ModuleHeader, SegmentedTabs } from '../../components/glass';
+import { RealTwsMonogram, RealTwsPlaqueBanner } from '../../design-system/components/RealTwsBrandMark';
 
 export type BrandMerchTab =
   | 'BRAND_CENTER'
@@ -56,13 +57,16 @@ const LOGO_VARIANT_LABELS: Record<LogoVariantId, string> = {
 export function BrandMerchandisingModule({
   initialTab = 'BRAND_CENTER'
 }: BrandMerchandisingModuleProps) {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { notify: rawNotify } = useNotifications();
   const notify = (
     message: string,
     type: 'success' | 'error' | 'warning' | 'info' = 'info'
   ) => rawNotify(type, 'Brand & Merchandising Center', message);
 
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canWriteMarketing =
+    effectiveRole === 'ADMIN' || effectiveRole === 'MARKETING_OPERATOR';
   const actorName = userProfile?.fullName || userProfile?.email || 'Director de Marca';
 
   const [activeTab, setActiveTab] = useState<BrandMerchTab>(initialTab);
@@ -229,6 +233,10 @@ export function BrandMerchandisingModule({
   };
 
   const handleSaveBrandVersion = () => {
+    if (!canWriteMarketing) {
+      notify(`El rol ${effectiveRole} es de solo lectura en Brand Center.`, 'error');
+      return;
+    }
     try {
       const updated = {
         ...brandState.currentBrandConfig,
@@ -244,7 +252,7 @@ export function BrandMerchandisingModule({
       };
       const ver = saveNewBrandIdentityVersion(
         updated,
-        brandVersionNote || 'Actualización manual de directrices de marca e información corporativa.',
+        brandVersionNote,
         actorName
       );
       refreshState();
@@ -259,15 +267,17 @@ export function BrandMerchandisingModule({
   };
 
   const handleSaveMerchPieceVersion = () => {
+    if (!canWriteMarketing) {
+      notify(`El rol ${effectiveRole} es de solo lectura en Merchandising.`, 'error');
+      return;
+    }
     try {
       const saved = saveMerchandisingAssetVersion({
         existingAssetId: editingAssetId,
         designConfig,
-        changeNote:
-          assetVersionNote ||
-          (editingAssetId
-            ? 'Nueva versión editada conservando versión original v1.'
-            : 'Versión original v1 generada desde catálogo real.'),
+        changeNote: editingAssetId
+          ? assetVersionNote
+          : assetVersionNote || 'Versión original v1 generada desde catálogo real.',
         actorName
       });
       refreshState();
@@ -328,11 +338,50 @@ export function BrandMerchandisingModule({
       {/* ===================================================================== */}
       {activeTab === 'BRAND_CENTER' && (
         <div style={{ display: 'grid', gap: '1.25rem' }}>
+          {/* IDENTIDAD VISUAL OFICIAL 3D LIQUID GLASS: PLACA Y MONOGRAMA RWS */}
+          <div className="card rtw-glass-surface-3">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '1.25rem'
+              }}
+            >
+              <div style={{ flex: '1 1 320px' }}>
+                <span className="badge badge-gold" style={{ marginBottom: '0.4rem' }}>
+                  IDENTIDAD OFICIAL REAL TWS · LIQUID GLASS & ORO CEPILLADO 3D
+                </span>
+                <h2 style={{ fontSize: '1.15rem', margin: '0 0 0.4rem 0' }}>
+                  Placa Insignia REAL TWS y Medallón Monograma Rws
+                </h2>
+                <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-secondary)', margin: '0 0 0.85rem 0' }}>
+                  Dirección artística oficial basada en negro obsidiana mate, tipografía 3D en oro champán cepillado, destello especular perimetral y monograma circular Rws.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <RealTwsMonogram size={56} />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>Medallón Rws 3D</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)' }}>
+                        Sello circular de alta precisión
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: '1 1 360px', maxWidth: '460px' }}>
+                <RealTwsPlaqueBanner />
+              </div>
+            </div>
+          </div>
+
           {/* BLOQUE SUPERIOR: LOGO Y 5 VARIANTES VECTORIALES + ESLOGAN Y TONO EDITABLES */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(410px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(410px, 100%), 1fr))',
               gap: '1.25rem'
             }}
           >
@@ -526,7 +575,7 @@ export function BrandMerchandisingModule({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(410px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(410px, 100%), 1fr))',
               gap: '1.25rem'
             }}
           >
@@ -707,7 +756,7 @@ export function BrandMerchandisingModule({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(410px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(410px, 100%), 1fr))',
             gap: '1.25rem',
             alignItems: 'start'
           }}

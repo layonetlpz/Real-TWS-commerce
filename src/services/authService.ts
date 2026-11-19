@@ -587,7 +587,16 @@ export function runMandatorySecurityTests(): {
     id: `audit-${r.id}-${Date.now()}`,
     timestamp: nowStr(),
     actorId: r.simulatedActor,
-    actorRole: r.category === 'EXPIRED_SESSION' ? 'EXPIRED_SESSION' : 'SALES_OPERATOR',
+    actorRole:
+      r.category === 'EXPIRED_SESSION'
+        ? 'EXPIRED_SESSION'
+        : r.category === 'CROSS_OWNER_READ'
+          ? 'OWNER'
+          : r.category === 'OWNER_TRANSFER'
+            ? 'INVENTORY_OPERATOR'
+            : r.category === 'SETTLEMENT_GUARD' && r.simulatedActor.startsWith('ADMIN')
+              ? 'ADMIN'
+              : 'SALES_OPERATOR',
     eventType: `SECURITY_TEST_${r.category}`,
     targetResource: r.attemptedAction,
     outcome: r.actualOutcome,

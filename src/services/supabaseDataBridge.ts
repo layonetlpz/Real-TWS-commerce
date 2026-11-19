@@ -232,6 +232,7 @@ export async function dispatchLiveAutomationEventRpc(input: {
   sku: string;
   ownerId: string;
   payload?: Record<string, unknown>;
+  triggeredBy?: string;
 }): Promise<{ ok: boolean; error: string | null }> {
   if (!supabase || !isSupabaseConfigured) {
     return { ok: false, error: 'Supabase no configurado en el cliente.' };
@@ -243,7 +244,8 @@ export async function dispatchLiveAutomationEventRpc(input: {
     p_reference_id: input.referenceId,
     p_sku: input.sku,
     p_owner_id: input.ownerId,
-    p_payload: input.payload ?? {}
+    p_payload: input.payload ?? {},
+    p_triggered_by: input.triggeredBy ?? 'client_rpc'
   } as never);
   return { ok: !error, error: error?.message ?? null };
 }
@@ -296,6 +298,7 @@ export async function fetchDashboardLiveSnapshot(
   if (incRes.error) errors.push(`Incidencias: ${incRes.error}`);
   if (salesRes.error) errors.push(`Ventas: ${salesRes.error.message}`);
   if (pnlRes.error) errors.push(`Finanzas por propietario: ${pnlRes.error.message}`);
+  if (catRes.error) errors.push(`Categorías: ${catRes.error.message}`);
 
   const inventoryRows = invRes.data;
   const incidences = incRes.data;
@@ -317,9 +320,9 @@ export async function fetchDashboardLiveSnapshot(
   );
 
   const netSalesCop = ownerPnlRows.reduce((acc, r) => acc + Number(r.net_sales_cop || 0), 0);
-  const cogsCop = ownerPnlRows.reduce((acc, r) => acc + Number(r.cogs_cop || 0), 0);
+  const cogsCop = ownerPnlRows.reduce((acc, r) => acc + Number(r.total_cogs_cop || 0), 0);
   const attributableProfitCop = ownerPnlRows.reduce(
-    (acc, r) => acc + Number(r.attributable_profit_cop || 0),
+    (acc, r) => acc + Number(r.net_attributable_profit_cop || 0),
     0
   );
   const openIncidencesCount = incidences.filter((i) => i.status !== 'Resuelto').length;

@@ -1,74 +1,138 @@
 /* ==========================================================================
-   REAL TWS COMMERCE SYSTEM — APPLE LIQUID GLASS DESIGN TOKENS & MOTION
-   Identidad Premium: Negro Obsidiana · Blanco Perla · Dorado Champagne
+   REAL TWS COMMERCE SYSTEM — LIQUID GLASS DESIGN TOKENS & MATERIAL ENGINE
+   Dirección Artística: Brushed Champagne Gold · Velvet Obsidian · Luminous Pearl
    ========================================================================== */
 
-:root {
-  /* Marca REAL TWS */
-  --rtw-obsidian: #0b0f17;
-  --rtw-black-deep: #0f141c;
-  --rtw-black-charcoal: #151c27;
-  --rtw-black-elevated: #1e2736;
-  --rtw-black-obsidian: #0b0f17;
+:root,
+[data-theme="light"] {
+  color-scheme: light;
 
+  /* Escala Cromática de Amarillo / Oro Metálico REAL TWS */
+  --color-yellow-100: #fff6cc;
+  --color-yellow-200: #f6df96;
+  --color-yellow-300: #e8c766;
+  --color-yellow-400: #d4af37;
+  --color-yellow-500: #c59b27;
+  --color-yellow-600: #b3881d;
+  --color-yellow-700: #8c6a22;
+  --color-yellow-800: #73540a;
+  --color-yellow-translucent: rgba(212, 175, 55, 0.15);
+  --color-yellow-reflection: rgba(255, 246, 204, 0.65);
+  --color-yellow-subtle-bg: rgba(212, 175, 55, 0.08);
+
+  /* Escala de Grises — Tema Claro (WHITE & YELLOW) */
+  --color-gray-50: #ffffff;
+  --color-gray-100: #f8f9fc;
+  --color-gray-200: #eef1f6;
+  --color-gray-300: #e2e7f0;
+  --color-gray-400: #cbd5e1;
+  --color-gray-500: #64748b;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1e293b;
+  --color-gray-900: #0b0f17;
+  --color-gray-950: #06080c;
+
+  /* Tokens Semánticos Centralizados — Modo Claro (WHITE & YELLOW) */
+  --color-brand-primary: #d4af37;
+  --color-brand-secondary: #0b0f17;
+  --color-accent: #b3881d;
+  --color-background: #f4f6fa;
+  --color-background-elevated: #ffffff;
+  --color-surface: rgba(255, 255, 255, 0.84);
+  --color-surface-glass: rgba(255, 255, 255, 0.74);
+  --color-surface-hover: rgba(212, 175, 55, 0.10);
+  --color-surface-inset: rgba(241, 245, 249, 0.82);
+  --color-border: rgba(15, 23, 42, 0.10);
+  --color-border-strong: rgba(15, 23, 42, 0.18);
+  --color-border-highlight: rgba(212, 175, 55, 0.48);
+  --color-text-primary: #0b0f17;
+  --color-text-secondary: #334155;
+  --color-text-muted: #64748b;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+  --color-info: #0369a1;
+
+  /* Tokens de Marca REAL TWS */
+  --rtw-obsidian: #080a0f;
+  --rtw-black-deep: #0b0e14;
+  --rtw-black-charcoal: #121721;
+  --rtw-black-elevated: #1a2130;
+  --rtw-black-obsidian: #080a0f;
+
+  --rtw-gold-flare: #fff6cc;
+  --rtw-gold-champagne: #f6df96;
   --rtw-gold-primary: #d4af37;
   --rtw-gold-bright: #e8c766;
-  --rtw-gold-hover: #be9824;
-  --rtw-gold-ink: #846205;
+  --rtw-gold-hover: #b3881d;
+  --rtw-gold-ink: #73540a;
   --rtw-gold-soft: rgba(212, 175, 55, 0.14);
-  --rtw-gold-border: rgba(212, 175, 55, 0.36);
+  --rtw-gold-border: rgba(212, 175, 55, 0.42);
   --rtw-gold-glow: rgba(212, 175, 55, 0.22);
 
-  /* Canvas y Superficies Sólidas Base (Fallback & Contraste) */
-  --rtw-bg-canvas: #eef2f7;
-  --rtw-bg-main: #eef2f7;
-  --rtw-bg-surface: rgba(255, 255, 255, 0.78);
+  /* Canvas y Superficies Adaptativas */
+  --rtw-bg-canvas: #f4f6fa;
+  --rtw-bg-main: #f4f6fa;
+  --rtw-bg-surface: rgba(255, 255, 255, 0.84);
   --rtw-bg-surface-solid: #ffffff;
-  --rtw-bg-subtle: rgba(248, 250, 252, 0.72);
-  --rtw-bg-input: rgba(255, 255, 255, 0.86);
-  --rtw-bg-calculated: rgba(241, 245, 249, 0.85);
+  --rtw-bg-subtle: rgba(248, 250, 252, 0.78);
+  --rtw-bg-input: rgba(255, 255, 255, 0.92);
+  --rtw-bg-input-focus: #ffffff;
+  --rtw-bg-calculated: rgba(241, 245, 249, 0.88);
+  --rtw-canvas-gradient:
+    radial-gradient(960px 520px at 10% -6%, rgba(212, 175, 55, 0.16), transparent 62%),
+    radial-gradient(840px 500px at 92% 4%, rgba(212, 175, 55, 0.09), transparent 60%),
+    radial-gradient(760px 620px at 50% 102%, rgba(148, 163, 184, 0.14), transparent 65%),
+    linear-gradient(180deg, #fafbfd 0%, #eef1f7 100%);
 
-  /* Liquid Glass — Capas Translúcidas */
-  --glass-bg-1: rgba(255, 255, 255, 0.72);
-  --glass-bg-2: rgba(255, 255, 255, 0.84);
-  --glass-bg-3: rgba(255, 255, 255, 0.92);
-  --glass-bg-subtle: rgba(248, 250, 252, 0.62);
-  --glass-bg-dark: rgba(13, 17, 25, 0.84);
-  --glass-bg-dark-elevated: rgba(21, 28, 39, 0.88);
-  --glass-bg-modal: rgba(255, 255, 255, 0.90);
+  /* 4 Niveles de Material Liquid Glass — Modo Claro */
+  --glass-bg-1: rgba(255, 255, 255, 0.68);
+  --glass-bg-2: rgba(255, 255, 255, 0.82);
+  --glass-bg-3: linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(252, 249, 238, 0.86) 100%);
+  --glass-bg-4: rgba(255, 255, 255, 0.94);
+  --glass-bg-subtle: rgba(248, 250, 252, 0.72);
+  --glass-bg-dark: rgba(11, 14, 20, 0.92);
+  --glass-bg-dark-elevated: rgba(18, 23, 33, 0.94);
+  --glass-bg-modal: rgba(255, 255, 255, 0.94);
+  --glass-bg-header: rgba(255, 255, 255, 0.78);
 
-  /* Liquid Glass — Desenfoques & Saturación (Presupuesto optimizado GPU) */
-  --glass-blur-sm: blur(12px) saturate(155%);
-  --glass-blur-md: blur(20px) saturate(175%);
-  --glass-blur-lg: blur(28px) saturate(185%);
+  /* Desenfoques & Saturación (4 Niveles) */
+  --glass-blur-1: blur(10px) saturate(145%);
+  --glass-blur-2: blur(18px) saturate(170%);
+  --glass-blur-3: blur(26px) saturate(185%);
+  --glass-blur-4: blur(32px) saturate(195%);
+  --glass-blur-sm: var(--glass-blur-1);
+  --glass-blur-md: var(--glass-blur-2);
+  --glass-blur-lg: var(--glass-blur-3);
 
   /* Bordes Especulares e Iluminación Ambiental */
-  --glass-border-light: rgba(255, 255, 255, 0.78);
-  --glass-border-outer: rgba(15, 23, 42, 0.08);
-  --glass-border-dark: rgba(255, 255, 255, 0.12);
-  --glass-specular-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.92);
-  --glass-specular-dark: inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
-  --glass-specular-gold: inset 0 1px 0 0 rgba(232, 199, 102, 0.38);
+  --glass-border-light: rgba(255, 255, 255, 0.88);
+  --glass-border-outer: rgba(15, 23, 42, 0.09);
+  --glass-border-dark: rgba(212, 175, 55, 0.28);
+  --glass-specular-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.96);
+  --glass-specular-dark: inset 0 1px 0 0 rgba(255, 246, 204, 0.20);
+  --glass-specular-gold: inset 0 1px 0 0 rgba(232, 199, 102, 0.48);
 
-  /* Sombras Multicapa Apple-grade */
+  /* Sombras Multicapa */
   --glass-shadow-xs:
     0 1px 2px rgba(15, 20, 28, 0.04),
     0 1px 1px rgba(15, 20, 28, 0.02);
   --glass-shadow-sm:
-    0 4px 16px -4px rgba(15, 20, 28, 0.06),
-    0 1px 3px rgba(15, 20, 28, 0.04),
+    0 6px 20px -6px rgba(15, 20, 28, 0.07),
+    0 2px 5px -1px rgba(15, 20, 28, 0.04),
     var(--glass-specular-top);
   --glass-shadow-md:
-    0 14px 36px -10px rgba(15, 20, 28, 0.12),
-    0 4px 12px -2px rgba(15, 20, 28, 0.05),
+    0 16px 38px -10px rgba(15, 20, 28, 0.12),
+    0 4px 12px -2px rgba(212, 175, 55, 0.08),
     var(--glass-specular-top);
   --glass-shadow-lg:
-    0 24px 56px -14px rgba(11, 15, 23, 0.22),
-    0 8px 20px -6px rgba(11, 15, 23, 0.09),
+    0 26px 60px -14px rgba(11, 15, 23, 0.22),
+    0 8px 22px -6px rgba(212, 175, 55, 0.12),
     var(--glass-specular-top);
   --glass-shadow-dark:
-    0 18px 44px -12px rgba(5, 8, 14, 0.42),
-    0 4px 12px rgba(5, 8, 14, 0.22),
+    0 20px 48px -12px rgba(4, 6, 10, 0.55),
+    0 4px 14px rgba(4, 6, 10, 0.32),
     var(--glass-specular-dark);
 
   /* Tipografía */
@@ -77,8 +141,8 @@
   --rtw-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Texto y Contraste WCAG AA+ */
-  --rtw-text-primary: #0f172a;
-  --rtw-text-secondary: #475569;
+  --rtw-text-primary: #0b0f17;
+  --rtw-text-secondary: #334155;
   --rtw-text-muted: #64748b;
   --rtw-text-on-dark: #f8fafc;
   --rtw-text-on-dark-muted: #cbd5e1;
@@ -86,30 +150,38 @@
   --rtw-border-light: rgba(15, 23, 42, 0.09);
   --rtw-border-strong: rgba(15, 23, 42, 0.16);
 
-  /* Estados Semánticos */
-  --rtw-success-bg: rgba(220, 252, 231, 0.84);
+  /* Estados Semánticos — Modo Claro */
+  --rtw-success-bg: rgba(220, 252, 231, 0.88);
   --rtw-success-text: #15803d;
-  --rtw-success-border: rgba(34, 197, 94, 0.28);
+  --rtw-success-border: rgba(34, 197, 94, 0.32);
 
-  --rtw-warning-bg: rgba(254, 243, 199, 0.86);
+  --rtw-warning-bg: rgba(254, 243, 199, 0.90);
   --rtw-warning-text: #92400e;
-  --rtw-warning-border: rgba(217, 119, 6, 0.30);
+  --rtw-warning-border: rgba(217, 119, 6, 0.34);
 
-  --rtw-danger-bg: rgba(254, 226, 226, 0.86);
+  --rtw-danger-bg: rgba(254, 226, 226, 0.90);
   --rtw-danger-text: #b91c1c;
-  --rtw-danger-border: rgba(239, 68, 68, 0.28);
+  --rtw-danger-border: rgba(239, 68, 68, 0.32);
 
-  --rtw-info-bg: rgba(224, 242, 254, 0.86);
+  --rtw-info-bg: rgba(224, 242, 254, 0.90);
   --rtw-info-text: #0369a1;
-  --rtw-info-border: rgba(14, 165, 233, 0.28);
+  --rtw-info-border: rgba(14, 165, 233, 0.32);
 
-  /* Curvas de Movimiento Apple Spring */
+  /* Gráficas Recharts */
+  --rtw-chart-grid: rgba(15, 23, 42, 0.08);
+  --rtw-chart-axis: #475569;
+  --rtw-chart-bar-primary: #161d29;
+  --rtw-chart-bar-available: #16a34a;
+  --rtw-chart-bar-gold: #d4af37;
+
+  /* Curvas de Movimiento */
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-liquid: cubic-bezier(0.25, 0.85, 0.35, 1);
 
   /* Dimensiones */
-  --rtw-sidebar-width: 266px;
+  --rtw-sidebar-width: 268px;
   --rtw-sidebar-collapsed: 78px;
   --rtw-header-height: 68px;
   --rtw-radius-xs: 8px;
@@ -121,10 +193,10 @@
   --rtw-shadow-sm: var(--glass-shadow-sm);
   --rtw-shadow-md: var(--glass-shadow-md);
 
-  /* Alias de compatibilidad para módulos heredados (cero variables rotas) */
+  /* Alias de compatibilidad */
   --accent-gold: var(--rtw-gold-ink);
   --bg-surface: var(--glass-bg-2);
-  --bg-elevated: var(--glass-bg-3);
+  --bg-elevated: var(--glass-bg-4);
   --border-subtle: var(--rtw-border-light);
   --text-secondary: var(--rtw-text-secondary);
   --text-muted: var(--rtw-text-muted);
@@ -133,12 +205,136 @@
   --status-danger: var(--rtw-danger-text);
 }
 
+/* ==========================================================================
+   MODO OSCURO — BLACK & YELLOW (OBSIDIANA MATE & ORO CHAMPAGNE CEPILLADO)
+   Inspirado directamente en la placa metálica 3D REAL TWS y el medallón Rws
+   ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-brand-primary: #e8c766;
+  --color-brand-secondary: #d4af37;
+  --color-accent: #f6df96;
+  --color-background: #080a0e;
+  --color-background-elevated: #11151d;
+  --color-surface: rgba(17, 21, 29, 0.84);
+  --color-surface-glass: rgba(14, 18, 25, 0.76);
+  --color-surface-hover: rgba(212, 175, 55, 0.14);
+  --color-surface-inset: rgba(10, 12, 17, 0.78);
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(212, 175, 55, 0.28);
+  --color-border-highlight: rgba(232, 199, 102, 0.58);
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #38bdf8;
+
+  --rtw-gold-ink: #e8c766;
+  --rtw-gold-soft: rgba(212, 175, 55, 0.18);
+  --rtw-gold-border: rgba(212, 175, 55, 0.45);
+  --rtw-gold-glow: rgba(232, 199, 102, 0.26);
+
+  --rtw-bg-canvas: #080a0e;
+  --rtw-bg-main: #080a0e;
+  --rtw-bg-surface: rgba(16, 20, 28, 0.86);
+  --rtw-bg-surface-solid: #11151e;
+  --rtw-bg-subtle: rgba(12, 15, 21, 0.78);
+  --rtw-bg-input: rgba(10, 13, 19, 0.88);
+  --rtw-bg-input-focus: rgba(15, 19, 28, 0.98);
+  --rtw-bg-calculated: rgba(20, 25, 36, 0.86);
+  --rtw-canvas-gradient:
+    radial-gradient(920px 500px at 14% -5%, rgba(212, 175, 55, 0.15), transparent 62%),
+    radial-gradient(820px 520px at 88% 6%, rgba(232, 199, 102, 0.09), transparent 60%),
+    radial-gradient(880px 640px at 50% 104%, rgba(212, 175, 55, 0.08), transparent 66%),
+    linear-gradient(180deg, #07080c 0%, #0c1017 52%, #080a0e 100%);
+
+  /* 4 Niveles de Material Liquid Glass — Modo Oscuro */
+  --glass-bg-1: rgba(14, 18, 25, 0.74);
+  --glass-bg-2: rgba(18, 23, 32, 0.84);
+  --glass-bg-3: linear-gradient(145deg, rgba(16, 20, 28, 0.95) 0%, rgba(24, 30, 42, 0.89) 55%, rgba(13, 16, 23, 0.95) 100%);
+  --glass-bg-4: rgba(16, 21, 30, 0.94);
+  --glass-bg-subtle: rgba(11, 14, 20, 0.68);
+  --glass-bg-dark: rgba(10, 13, 19, 0.94);
+  --glass-bg-dark-elevated: rgba(18, 23, 33, 0.95);
+  --glass-bg-modal: rgba(15, 19, 27, 0.96);
+  --glass-bg-header: rgba(10, 13, 19, 0.82);
+
+  --glass-border-light: rgba(212, 175, 55, 0.22);
+  --glass-border-outer: rgba(255, 255, 255, 0.05);
+  --glass-border-dark: rgba(212, 175, 55, 0.36);
+  --glass-specular-top: inset 0 1px 0 0 rgba(255, 246, 204, 0.16);
+  --glass-specular-dark: inset 0 1px 0 0 rgba(255, 246, 204, 0.22);
+  --glass-specular-gold: inset 0 1px 0 0 rgba(246, 223, 150, 0.52);
+
+  --glass-shadow-xs:
+    0 2px 6px rgba(0, 0, 0, 0.35);
+  --glass-shadow-sm:
+    0 10px 28px -8px rgba(0, 0, 0, 0.58),
+    0 2px 8px rgba(0, 0, 0, 0.36),
+    var(--glass-specular-top);
+  --glass-shadow-md:
+    0 18px 42px -10px rgba(0, 0, 0, 0.72),
+    0 4px 16px -2px rgba(212, 175, 55, 0.10),
+    var(--glass-specular-top);
+  --glass-shadow-lg:
+    0 28px 68px -12px rgba(0, 0, 0, 0.85),
+    0 0 28px -8px rgba(212, 175, 55, 0.18),
+    var(--glass-specular-gold);
+
+  --rtw-text-primary: #f8fafc;
+  --rtw-text-secondary: #cbd5e1;
+  --rtw-text-muted: #94a3b8;
+  --rtw-border-light: rgba(255, 255, 255, 0.09);
+  --rtw-border-strong: rgba(212, 175, 55, 0.28);
+
+  /* Estados Semánticos — Modo Oscuro */
+  --rtw-success-bg: rgba(20, 83, 45, 0.42);
+  --rtw-success-text: #4ade80;
+  --rtw-success-border: rgba(74, 222, 128, 0.34);
+
+  --rtw-warning-bg: rgba(120, 53, 15, 0.44);
+  --rtw-warning-text: #fcd34d;
+  --rtw-warning-border: rgba(251, 191, 36, 0.38);
+
+  --rtw-danger-bg: rgba(127, 29, 29, 0.45);
+  --rtw-danger-text: #fca5a5;
+  --rtw-danger-border: rgba(248, 113, 113, 0.36);
+
+  --rtw-info-bg: rgba(12, 74, 110, 0.44);
+  --rtw-info-text: #7dd3fc;
+  --rtw-info-border: rgba(56, 189, 248, 0.35);
+
+  /* Gráficas Recharts — Modo Oscuro */
+  --rtw-chart-grid: rgba(255, 255, 255, 0.07);
+  --rtw-chart-axis: #94a3b8;
+  --rtw-chart-bar-primary: #64748b;
+  --rtw-chart-bar-available: #22c55e;
+  --rtw-chart-bar-gold: #e8c766;
+
+  --accent-gold: var(--rtw-gold-bright);
+}
+
+/* ================= TRANSICIÓN SUAVE ENTRE TEMAS ================= */
+html.rtw-theme-transitioning,
+html.rtw-theme-transitioning *,
+html.rtw-theme-transitioning *::before,
+html.rtw-theme-transitioning *::after {
+  transition:
+    background-color 320ms var(--ease-smooth),
+    border-color 320ms var(--ease-smooth),
+    color 260ms var(--ease-smooth),
+    box-shadow 320ms var(--ease-smooth) !important;
+}
+
 /* ================= KEYFRAMES DE MOVIMIENTO ================= */
 
 @keyframes rtw-module-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.994);
+    transform: translateY(10px) scale(0.994);
   }
   to {
     opacity: 1;
@@ -160,7 +356,7 @@
 @keyframes rtw-modal-enter {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.965);
+    transform: translateY(16px) scale(0.965);
   }
   to {
     opacity: 1;
@@ -169,12 +365,8 @@
 }
 
 @keyframes rtw-backdrop-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes rtw-drawer-right {
@@ -211,18 +403,12 @@
 }
 
 @keyframes rtw-shimmer {
-  0% {
-    background-position: -480px 0;
-  }
-  100% {
-    background-position: 480px 0;
-  }
+  0% { background-position: -480px 0; }
+  100% { background-position: 480px 0; }
 }
 
 @keyframes rtw-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes rtw-pulse-soft {
@@ -236,36 +422,102 @@
   }
 }
 
-/* ================= UTILIDADES LIQUID GLASS ================= */
+@keyframes rtw-gold-flare-breathe {
+  0%, 100% {
+    opacity: 0.82;
+    transform: translateX(-50%) scaleX(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1.08);
+  }
+}
 
+/* ================= 4 NIVELES DE SUPERFICIE LIQUID GLASS ================= */
+
+/* Nivel 1 — Subtle Glass */
+.rtw-glass-surface-1,
 .rtw-glass {
   background: var(--glass-bg-1);
-  backdrop-filter: var(--glass-blur-md);
-  -webkit-backdrop-filter: var(--glass-blur-md);
+  backdrop-filter: var(--glass-blur-1);
+  -webkit-backdrop-filter: var(--glass-blur-1);
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-xs);
+}
+
+/* Nivel 2 — Medium Glass */
+.rtw-glass-surface-2,
+.rtw-glass-elevated {
+  background: var(--glass-bg-2);
+  backdrop-filter: var(--glass-blur-2);
+  -webkit-backdrop-filter: var(--glass-blur-2);
   border: 1px solid var(--glass-border-light);
   box-shadow: var(--glass-shadow-sm);
 }
 
-.rtw-glass-elevated {
-  background: var(--glass-bg-2);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
-  border: 1px solid var(--glass-border-light);
+/* Nivel 3 — Premium Plaque Glass */
+.rtw-glass-surface-3 {
+  background: var(--glass-bg-3);
+  backdrop-filter: var(--glass-blur-3);
+  -webkit-backdrop-filter: var(--glass-blur-3);
+  border: 1px solid var(--color-border-highlight);
   box-shadow: var(--glass-shadow-md);
+  position: relative;
+}
+
+/* Nivel 4 — Floating Overlay Glass */
+.rtw-glass-surface-4 {
+  background: var(--glass-bg-4);
+  backdrop-filter: var(--glass-blur-4);
+  -webkit-backdrop-filter: var(--glass-blur-4);
+  border: 1px solid var(--color-border-highlight);
+  box-shadow: var(--glass-shadow-lg);
 }
 
 .rtw-glass-dark {
   background: linear-gradient(
     145deg,
-    rgba(13, 17, 25, 0.92) 0%,
-    rgba(24, 32, 46, 0.86) 55%,
-    rgba(16, 21, 31, 0.92) 100%
+    rgba(11, 14, 20, 0.95) 0%,
+    rgba(20, 26, 37, 0.90) 55%,
+    rgba(12, 15, 22, 0.96) 100%
   );
-  backdrop-filter: var(--glass-blur-md);
-  -webkit-backdrop-filter: var(--glass-blur-md);
-  border: 1px solid rgba(212, 175, 55, 0.28);
+  backdrop-filter: var(--glass-blur-3);
+  -webkit-backdrop-filter: var(--glass-blur-3);
+  border: 1px solid rgba(212, 175, 55, 0.38);
   box-shadow: var(--glass-shadow-dark);
   color: var(--rtw-text-on-dark);
+}
+
+.rtw-gold-rim {
+  border-color: rgba(212, 175, 55, 0.48) !important;
+  box-shadow:
+    var(--glass-shadow-md),
+    0 0 0 1px rgba(255, 246, 204, 0.14);
+}
+
+/* Destello especular central superior inspirado en la imagen de referencia #1 */
+.rtw-specular-flare {
+  position: relative;
+}
+
+.rtw-specular-flare::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(260px, 68%);
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.45) 22%,
+    #fff6cc 50%,
+    rgba(212, 175, 55, 0.45) 78%,
+    transparent 100%
+  );
+  box-shadow: 0 0 14px 1px rgba(255, 244, 196, 0.55);
 }
 
 .rtw-glass-interactive {
@@ -286,16 +538,16 @@
   transition: opacity 0.28s var(--ease-smooth);
   background: radial-gradient(
     420px circle at var(--mouse-x, 50%) var(--mouse-y, 0%),
-    rgba(212, 175, 55, 0.13),
-    rgba(255, 255, 255, 0.24) 38%,
-    transparent 70%
+    rgba(232, 199, 102, 0.16),
+    rgba(255, 255, 255, 0.10) 40%,
+    transparent 72%
   );
 }
 
 .rtw-glass-interactive:hover {
   transform: translateY(-2px);
   box-shadow: var(--glass-shadow-md);
-  border-color: rgba(212, 175, 55, 0.34);
+  border-color: rgba(212, 175, 55, 0.48);
 }
 
 .rtw-glass-interactive:hover::after {
@@ -311,7 +563,7 @@
   height: 7px;
   border-radius: 999px;
   background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.24);
   display: inline-block;
   animation: rtw-pulse-soft 2.2s ease-in-out infinite;
 }
@@ -324,34 +576,23 @@
 
 /* ================= FALLBACK SIN BACKDROP-FILTER ================= */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  :root {
+  :root,
+  [data-theme="light"] {
     --glass-bg-1: #ffffff;
     --glass-bg-2: #ffffff;
     --glass-bg-3: #ffffff;
+    --glass-bg-4: #ffffff;
     --glass-bg-subtle: #f8fafc;
-    --glass-bg-dark: #111722;
-    --glass-bg-dark-elevated: #18202f;
     --glass-bg-modal: #ffffff;
   }
 
-  .rtw-glass,
-  .rtw-glass-elevated,
-  .rtw-top-header,
-  .rtw-card,
-  .card,
-  .rtw-kpi-card,
-  .kpi-card,
-  .rtw-modal,
-  .rtw-drawer,
-  .rtw-dropdown-menu {
-    background: #ffffff !important;
-    border-color: #cbd5e1 !important;
-  }
-
-  .rtw-sidebar,
-  .rtw-glass-dark,
-  .rtw-toast {
-    background: #111722 !important;
+  [data-theme="dark"] {
+    --glass-bg-1: #111620;
+    --glass-bg-2: #141a26;
+    --glass-bg-3: #171e2c;
+    --glass-bg-4: #192130;
+    --glass-bg-subtle: #0e121a;
+    --glass-bg-modal: #141a26;
   }
 }
 

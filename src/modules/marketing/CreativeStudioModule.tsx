@@ -26,7 +26,7 @@ import {
 } from '../../services/brandMerchandisingService';
 import {
   getCreativeStudioState,
-  getOrInitializeOwnerMarketingConsent,
+  readOwnerMarketingConsent,
   registerOwnerMarketingConsent,
   validateCreativeCompliance,
   generateValidatedCopywritingBundle,
@@ -73,10 +73,13 @@ type StudioTabId =
   | 'MEDIA_LIBRARY';
 
 export const CreativeStudioModule: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
 
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canWriteCreative =
+    effectiveRole === 'ADMIN' || effectiveRole === 'MARKETING_OPERATOR';
   const actorName = userProfile?.fullName || userProfile?.email || 'Operador Marketing REAL TWS';
 
   const [activeTab, setActiveTab] = useState<StudioTabId>('VALIDATION_AND_CONSENT');
@@ -95,7 +98,7 @@ export const CreativeStudioModule: React.FC = () => {
 
   const availableOwnersForSku = useMemo(() => {
     if (!selectedItem || selectedItem.ownerAllocations.length === 0) {
-      return [{ ownerId: 'OWN-0001', ownerName: 'Eberto (Propietario Inicial)', qtyAvailable: 0 }];
+      return [];
     }
     return selectedItem.ownerAllocations;
   }, [selectedItem]);
@@ -115,19 +118,19 @@ export const CreativeStudioModule: React.FC = () => {
 
   const currentOwnerName = useMemo(() => {
     const found = availableOwnersForSku.find((o) => o.ownerId === selectedOwnerId);
-    return found ? found.ownerName : 'Eberto';
+    return found ? found.ownerName : selectedOwnerId;
   }, [availableOwnersForSku, selectedOwnerId]);
 
-  // Estado de Consentimiento Comercial del Propietario (Sección F)
+  // Estado de Consentimiento Comercial del Propietario (lectura pura sin mutar almacenamiento en render)
   const currentConsent = useMemo(() => {
     if (!selectedItem) return null;
-    return getOrInitializeOwnerMarketingConsent(
+    return readOwnerMarketingConsent(
       selectedOwnerId,
       currentOwnerName,
       selectedItem.sku,
       selectedItem.productName
     );
-  }, [selectedItem, selectedOwnerId, currentOwnerName, refreshTick]);
+  }, [selectedItem, selectedOwnerId, currentOwnerName, studioState]);
 
   const [consentMaxDiscDraft, setConsentMaxDiscDraft] = useState<number>(0);
   const [consentNotesDraft, setConsentNotesDraft] = useState<string>(
@@ -245,6 +248,10 @@ export const CreativeStudioModule: React.FC = () => {
 
   // Handlers
   const handleUpdateConsent = (status: 'granted' | 'revoked') => {
+    if (!canWriteCreative) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} es de solo lectura en Creative Studio.`);
+      return;
+    }
     if (!selectedItem) return;
     try {
       const updated = registerOwnerMarketingConsent({
@@ -278,13 +285,19 @@ export const CreativeStudioModule: React.FC = () => {
   const handleUploadRealProductPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      notify('error', 'Archivo inválido', 'Seleccione una fotografía real en formato PNG, JPG o WEBP.');
+    const allowedRasterTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!allowedRasterTypes.includes(file.type)) {
+      notify(
+        'error',
+        'Formato de imagen no permitido',
+        'Solo se permiten fotografías reales PNG, JPG o WEBP (SVG bloqueado por seguridad).'
+      );
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
+      if (typeof reader.result === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(reader.result)) {
         setComposerSettings((prev) => ({
           ...prev,
           originalProductPhotoDataUrl: reader.result as string
@@ -365,11 +378,15 @@ export const CreativeStudioModule: React.FC = () => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify('success', 'Guion descargado', `Storyboard de ${selectedVideoDuration}s exportado en TXT.`);
   };
 
   const handleSaveGeminiAdapterConfig = () => {
+    if (!canWriteCreative) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} es de solo lectura.`);
+      return;
+    }
     updateOptionalGeminiAdapterSettings({
       enabled: geminiEnabledDraft,
       dailyQuotaLimit: geminiQuotaDraft
@@ -383,6 +400,10 @@ export const CreativeStudioModule: React.FC = () => {
   };
 
   const handleSaveProjectToLibrary = () => {
+    if (!canWriteCreative) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} es de solo lectura.`);
+      return;
+    }
     if (!selectedItem || !generatedCopyBundle || !generatedVideoBundle || !composedSvgMarkup) {
       notify(
         'error',
@@ -626,7 +647,7 @@ export const CreativeStudioModule: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))',
             gap: '1.5rem'
           }}
         >
@@ -635,7 +656,7 @@ export const CreativeStudioModule: React.FC = () => {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.4rem' }}>
               G. Motor de Validación Comercial Estricta
             </h2>
-            <p style={{ fontSize: '0.84rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               El estudio bloquea automáticamente la generación o guardado si falta precio aprobado, si no hay stock disponible, si el descuento excede el acuerdo o si se afirman características desconocidas.
             </p>
 
@@ -683,7 +704,7 @@ export const CreativeStudioModule: React.FC = () => {
                   )}
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>{row.title}</div>
-                    <div style={{ fontSize: '0.8rem', color: '#4B5563', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)', marginTop: '0.15rem' }}>
                       {row.check.message}
                     </div>
                   </div>
@@ -691,7 +712,7 @@ export const CreativeStudioModule: React.FC = () => {
               ))}
             </div>
 
-            <div style={{ marginTop: '1.15rem', paddingTop: '1rem', borderTop: '1px solid #E5E7EB' }}>
+            <div style={{ marginTop: '1.15rem', paddingTop: '1rem', borderTop: '1px solid var(--rtw-border-light)' }}>
               <label className="form-label">
                 Inspector Anti-Alucinación de Texto Publicitario (Prueba de Especificaciones)
               </label>
@@ -702,7 +723,7 @@ export const CreativeStudioModule: React.FC = () => {
                 value={customTextInspector}
                 onChange={(e) => setCustomTextInspector(e.target.value)}
               />
-              <span style={{ fontSize: '0.75rem', color: '#6B7280', display: 'block', marginTop: '0.3rem' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--rtw-text-muted)', display: 'block', marginTop: '0.3rem' }}>
                 Si escribes una característica técnica no registrada en la ficha del SKU, la regla #5 la bloqueará de inmediato.
               </span>
             </div>
@@ -732,7 +753,7 @@ export const CreativeStudioModule: React.FC = () => {
               )}
             </div>
 
-            <p style={{ fontSize: '0.84rem', color: '#6B7280', marginTop: '0.4rem', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)', marginTop: '0.4rem', marginBottom: '1rem' }}>
               Antes de promocionar o guardar piezas publicitarias de un artículo, debe registrarse el consentimiento explícito del propietario de la mercancía (<strong>{selectedOwnerId} — {currentOwnerName}</strong>).
             </p>
 
@@ -770,7 +791,7 @@ export const CreativeStudioModule: React.FC = () => {
                       gap: '0.35rem',
                       padding: '0.4rem 0.7rem',
                       borderRadius: '0.4rem',
-                      border: '1px solid #D1D5DB',
+                      border: '1px solid var(--rtw-border-light)',
                       cursor: 'pointer',
                       fontSize: '0.82rem',
                       fontWeight: 600,
@@ -847,7 +868,7 @@ export const CreativeStudioModule: React.FC = () => {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
                   gap: '1.25rem'
                 }}
               >
@@ -863,8 +884,8 @@ export const CreativeStudioModule: React.FC = () => {
                         style={{
                           padding: '0.65rem 0.8rem',
                           borderRadius: '0.45rem',
-                          background: '#F9FAFB',
-                          border: '1px solid #E5E7EB',
+                          background: 'var(--rtw-bg-subtle)',
+                          border: '1px solid var(--rtw-border-light)',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
@@ -899,8 +920,8 @@ export const CreativeStudioModule: React.FC = () => {
                         style={{
                           padding: '0.6rem 0.75rem',
                           borderRadius: '0.45rem',
-                          background: '#F9FAFB',
-                          border: '1px solid #E5E7EB',
+                          background: 'var(--rtw-bg-subtle)',
+                          border: '1px solid var(--rtw-border-light)',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
@@ -965,7 +986,7 @@ export const CreativeStudioModule: React.FC = () => {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))',
                     gap: '0.85rem'
                   }}
                 >
@@ -975,8 +996,8 @@ export const CreativeStudioModule: React.FC = () => {
                       style={{
                         padding: '0.85rem',
                         borderRadius: '0.5rem',
-                        background: '#F9FAFB',
-                        border: '1px solid #E5E7EB',
+                        background: 'var(--rtw-bg-subtle)',
+                        border: '1px solid var(--rtw-border-light)',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'space-between',
@@ -1041,8 +1062,8 @@ export const CreativeStudioModule: React.FC = () => {
                       style={{
                         padding: '0.9rem',
                         borderRadius: '0.5rem',
-                        border: '1px solid #D1D5DB',
-                        background: '#FFFFFF',
+                        border: '1px solid var(--rtw-border-light)',
+                        background: 'var(--rtw-bg-surface)',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'space-between',
@@ -1055,7 +1076,7 @@ export const CreativeStudioModule: React.FC = () => {
                             fontWeight: 800,
                             fontSize: '0.86rem',
                             marginBottom: '0.45rem',
-                            color: '#111827'
+                            color: 'var(--rtw-text-primary)'
                           }}
                         >
                           {ch.title}
@@ -1065,7 +1086,7 @@ export const CreativeStudioModule: React.FC = () => {
                             whiteSpace: 'pre-wrap',
                             fontFamily: 'inherit',
                             fontSize: '0.8rem',
-                            color: '#374151',
+                            color: 'var(--rtw-text-secondary)',
                             margin: 0,
                             lineHeight: 1.45
                           }}
@@ -1115,7 +1136,7 @@ export const CreativeStudioModule: React.FC = () => {
                   <h2 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
                     B. Guiones Audiovisuales y Storyboard por Escenas (10s, 15s, 30s y 45s)
                   </h2>
-                  <p style={{ fontSize: '0.84rem', color: '#6B7280', marginTop: '0.25rem' }}>
+                  <p style={{ fontSize: '0.84rem', color: 'var(--rtw-text-muted)', marginTop: '0.25rem' }}>
                     Incluye estructura de escenas, narración (voz en off), subtítulos sincronizados, texto en pantalla y llamada a la acción.
                   </p>
                 </div>
@@ -1235,7 +1256,7 @@ export const CreativeStudioModule: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
             gap: '1.5rem',
             alignItems: 'start'
           }}
@@ -1245,7 +1266,7 @@ export const CreativeStudioModule: React.FC = () => {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.4rem' }}>
               C &amp; D. Image Composer + Brand Kit REAL TWS
             </h2>
-            <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               Compone piezas listas para publicar en formatos <strong>1:1</strong>, <strong>4:5</strong> y <strong>9:16</strong> agregando logo REAL TWS, precio vigente, SKU y textos aprobados sin modificar ni distorsionar la fotografía original del producto.
             </p>
 
@@ -1304,7 +1325,7 @@ export const CreativeStudioModule: React.FC = () => {
                   Subir Fotografía Real (PNG/JPG/WEBP)
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp"
                     style={{ display: 'none' }}
                     onChange={handleUploadRealProductPhoto}
                   />
@@ -1452,7 +1473,7 @@ export const CreativeStudioModule: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
             gap: '1.5rem'
           }}
         >
@@ -1463,7 +1484,7 @@ export const CreativeStudioModule: React.FC = () => {
                 E. Adaptador Opcional Gemini API &amp; Control de Cuota
               </h2>
             </div>
-            <p style={{ fontSize: '0.83rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.83rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               El estudio creativo funciona al <strong>100% sin exigir IA</strong> mediante su motor determinístico local. El adaptador Gemini API es estrictamente opcional, controla cuota diaria, bloquea cualquier activación de facturación o servicios gráficos pagos y filtra datos privados.
             </p>
 
@@ -1522,7 +1543,7 @@ export const CreativeStudioModule: React.FC = () => {
             <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '0.4rem' }}>
               Inspector de Payload Público Comercial Sanitizado
             </h3>
-            <p style={{ fontSize: '0.8rem', color: '#6B7280', marginBottom: '0.75rem' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)', marginBottom: '0.75rem' }}>
               Demostración técnica de privacidad: nunca se envían nombres de clientes, teléfonos privados, costos de compra por lote ni comisiones de propietarios.
             </p>
             <pre
@@ -1543,14 +1564,14 @@ export const CreativeStudioModule: React.FC = () => {
             </h4>
             <div style={{ maxHeight: '190px', overflowY: 'auto', fontSize: '0.76rem' }}>
               {studioState.aiAdapterConfig.auditLogs.length === 0 ? (
-                <div style={{ color: '#6B7280' }}>Sin ejecuciones registradas aún.</div>
+                <div style={{ color: 'var(--rtw-text-muted)' }}>Sin ejecuciones registradas aún.</div>
               ) : (
                 studioState.aiAdapterConfig.auditLogs.slice(0, 8).map((log) => (
                   <div
                     key={log.id}
                     style={{
                       padding: '0.45rem 0',
-                      borderBottom: '1px solid #E5E7EB',
+                      borderBottom: '1px solid var(--rtw-border-light)',
                       display: 'flex',
                       justifyContent: 'space-between'
                     }}
@@ -1558,7 +1579,7 @@ export const CreativeStudioModule: React.FC = () => {
                     <span>
                       <strong>{log.sku}</strong> • {log.modeUsed}
                     </span>
-                    <span style={{ color: '#6B7280' }}>{formatDateCO(log.timestamp)}</span>
+                    <span style={{ color: 'var(--rtw-text-muted)' }}>{formatDateCO(log.timestamp)}</span>
                   </div>
                 ))
               )}
@@ -1576,7 +1597,7 @@ export const CreativeStudioModule: React.FC = () => {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.4rem' }}>
               F. Biblioteca Multimedia Vinculada a SKU y Propietario
             </h2>
-            <p style={{ fontSize: '0.83rem', color: '#6B7280', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.83rem', color: 'var(--rtw-text-muted)', marginBottom: '1rem' }}>
               Cada proyecto conserva la fotografía original sin alterar, la imagen compuesta final, el paquete de copywriting, los 4 guiones de video y el historial de versiones inmutables (<code>v1..vN</code>) relacionado con su SKU y Propietario.
             </p>
 
@@ -1635,9 +1656,9 @@ export const CreativeStudioModule: React.FC = () => {
                 style={{
                   padding: '2rem',
                   textAlign: 'center',
-                  background: '#F9FAFB',
+                  background: 'var(--rtw-bg-subtle)',
                   borderRadius: '0.5rem',
-                  color: '#6B7280'
+                  color: 'var(--rtw-text-muted)'
                 }}
               >
                 No hay proyectos guardados aún. Otorgue el consentimiento comercial en la Pestaña 1 y pulse{' '}
@@ -1722,8 +1743,8 @@ export const CreativeStudioModule: React.FC = () => {
                     style={{
                       padding: '1rem',
                       borderRadius: '0.5rem',
-                      border: ver.isOriginalBaseline ? '2px solid #D4AF37' : '1px solid #D1D5DB',
-                      background: '#FFFFFF'
+                      border: ver.isOriginalBaseline ? '2px solid #D4AF37' : '1px solid var(--rtw-border-light)',
+                      background: 'var(--rtw-bg-surface)'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
@@ -1731,11 +1752,11 @@ export const CreativeStudioModule: React.FC = () => {
                         Versión v{ver.versionNumber}{' '}
                         {ver.isOriginalBaseline ? '(Original Intacta)' : ''}
                       </span>
-                      <span style={{ fontSize: '0.76rem', color: '#6B7280' }}>
+                      <span style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>
                         Formato {ver.aspectRatio}
                       </span>
                     </div>
-                    <p style={{ fontSize: '0.8rem', color: '#4B5563', marginBottom: '0.6rem' }}>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)', marginBottom: '0.6rem' }}>
                       {ver.changeNote}
                     </p>
                     <div

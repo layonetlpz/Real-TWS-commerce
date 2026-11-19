@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode
 } from 'react';
@@ -13,6 +14,7 @@ import {
   signInWithEmailPassword,
   signOutCurrentSession
 } from '../services/authService';
+import { useOwnerScope } from './useOwnerScope';
 import type {
   AuthStatus,
   SecurityAuditEvent,
@@ -46,6 +48,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { setSelectedOwnerScope } = useOwnerScope();
   const [authStatus, setAuthStatus] = useState<AuthStatus>(
     isSupabaseConfigured ? 'LOADING' : 'UNAUTHENTICATED'
   );
@@ -54,6 +57,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useState<UserRole | null>(null);
   const [securityEvents, setSecurityEvents] = useState<SecurityAuditEvent[]>(
     []
+  );
+  const passwordRecoveryPendingRef = useRef(
+    typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
   );
 
   // Solo un administrador real autenticado puede previsualizar permisos de otro rol en UI.
@@ -66,9 +72,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setActiveRolePreviewState(null);
         return;
       }
-      setActiveRolePreviewState(role);
+      setActiveRolePreviewState((prev) => {
+        if (prev === 'OWNER' && role !== 'OWNER') {
+          setSelectedOwnerScope('ALL');
+        }
+        return role;
+      });
     },
-    [userProfile?.role]
+    [userProfile?.role, setSelectedOwnerScope]
   );
 
   const activeEffectiveRole: UserRole =
@@ -117,6 +128,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data, error }) => {
       if (!mounted) return;
+      if (passwordRecoveryPendingRef.current) {
+        setAuthStatus('PASSWORD_RECOVERY');
+        return;
+      }
       if (error || !data.session) {
         setAuthStatus('UNAUTHENTICATED');
         return;
@@ -126,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (expiresAtMs > 0 && expiresAtMs < Date.now()) {
         setUserProfile(null);
         setActiveRolePreviewState(null);
+        setSelectedOwnerScope('ALL');
         setAuthStatus('SESSION_EXPIRED');
         return;
       }
@@ -140,8 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUserProfile(profile);
         setAuthStatus('AUTHENTICATED');
       } else {
+        await signOutCurrentSession();
         setUserProfile(null);
         setActiveRolePreviewState(null);
+        setSelectedOwnerScope('ALL');
         setAuthStatus('UNAUTHENTICATED');
       }
     });
@@ -151,20 +169,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!mounted) return;
 
         if (event === 'PASSWORD_RECOVERY') {
+          passwordRecoveryPendingRef.current = true;
           setAuthStatus('PASSWORD_RECOVERY');
           return;
         }
 
         if (event === 'SIGNED_OUT' || !session) {
+          passwordRecoveryPendingRef.current = false;
           setUserProfile(null);
           setActiveRolePreviewState(null);
+          setSelectedOwnerScope('ALL');
           setAuthStatus((prev) =>
             prev === 'SESSION_EXPIRED' ? 'SESSION_EXPIRED' : 'UNAUTHENTICATED'
           );
           return;
         }
 
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (
+          event === 'SIGNED_IN' ||
+          event === 'TOKEN_REFRESHED' ||
+          event === 'USER_UPDATED'
+        ) {
+          if (event === 'USER_UPDATED') {
+            passwordRecoveryPendingRef.current = false;
+          }
+          if (passwordRecoveryPendingRef.current) {
+            setAuthStatus('PASSWORD_RECOVERY');
+            return;
+          }
           const { profile } = await fetchUserProfileById(
             session.user.id,
             session.user.email ?? ''
@@ -174,8 +206,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUserProfile(profile);
             setAuthStatus('AUTHENTICATED');
           } else {
+            await signOutCurrentSession();
             setUserProfile(null);
             setActiveRolePreviewState(null);
+            setSelectedOwnerScope('ALL');
             setAuthStatus('UNAUTHENTICATED');
           }
         }
@@ -186,9 +220,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       subscription.subscription.unsubscribe();
     };
-  }, []);
+  }, [setSelectedOwnerScope]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    passwordRecoveryPendingRef.current = false;
     const { profile, error } = await signInWithEmailPassword(email, password);
     if (error || !profile) {
       return { error: error ?? 'No fue posible iniciar sesión.' };
@@ -202,16 +237,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUserProfile(profile);
     setActiveRolePreviewState(null);
+    setSelectedOwnerScope('ALL');
     setAuthStatus('AUTHENTICATED');
     return { error: null };
-  }, []);
+  }, [setSelectedOwnerScope]);
 
   const signOut = useCallback(async () => {
+    passwordRecoveryPendingRef.current = false;
     await signOutCurrentSession();
     setUserProfile(null);
     setActiveRolePreviewState(null);
+    setSelectedOwnerScope('ALL');
     setAuthStatus('UNAUTHENTICATED');
-  }, []);
+  }, [setSelectedOwnerScope]);
 
   const triggerSessionExpiredSimulation = useCallback(() => {
     setAuthStatus('SESSION_EXPIRED');
@@ -226,8 +264,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logGuardEvent]);
 
   const restoreExpiredSessionSimulation = useCallback(() => {
-    setAuthStatus(userProfile ? 'AUTHENTICATED' : 'UNAUTHENTICATED');
-  }, [userProfile]);
+    // Exige reautenticación real en Supabase Auth; nunca restaura acceso sin credenciales.
+    void signOut();
+  }, [signOut]);
 
   return (
     <AuthContext.Provider

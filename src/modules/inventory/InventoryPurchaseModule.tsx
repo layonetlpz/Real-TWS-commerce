@@ -24,6 +24,7 @@ import {
   type InventoryTestScenarioResult,
   getInventoryPurchaseState,
   ensureExcelBaselineLoadedInInventory,
+  syncOwnersIntoInventoryStore,
   updateProductVariantCatalogItem,
   registerOrUpdateSupplier,
   txCreatePurchaseOrder,
@@ -38,6 +39,7 @@ import {
   buildInventoryReports,
   runInventoryPurchaseTestSuite
 } from '../../services/inventoryPurchaseService';
+import { fetchLiveOwnersFromSupabase } from '../../services/supabaseDataBridge';
 import { exportRowsToCsvUtf8 } from '../../utils/spreadsheetParser';
 import { formatCOP, formatInteger } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
@@ -63,24 +65,32 @@ interface InventoryPurchaseModuleProps {
 export function InventoryPurchaseModule({
   initialSection = 'INVENTORY_OPERATIONS'
 }: InventoryPurchaseModuleProps) {
-  const { userProfile } = useAuth();
+  const { userProfile, activeEffectiveRole } = useAuth();
   const { selectedOwnerScope } = useOwnerScope();
   const { notify } = useNotifications();
-  const actorEmail = userProfile?.email || 'admin@realtws.co';
+  const actorEmail = userProfile?.email || 'sistema@realtws.co';
+  const effectiveRole = activeEffectiveRole || userProfile?.role || 'VIEWER';
+  const canWriteInventory = effectiveRole === 'ADMIN' || effectiveRole === 'INVENTORY_OPERATOR';
+  const canTransferOwnership = effectiveRole === 'ADMIN';
+  const canImportExcel = effectiveRole === 'ADMIN' || effectiveRole === 'INVENTORY_OPERATOR';
 
   const [activeSection, setActiveSection] = useState<InventoryModuleSection>(initialSection);
   const [store, setStore] = useState<InventoryPurchaseStoreState>(() =>
     getInventoryPurchaseState()
   );
   const [isSyncingBaseline, setIsSyncingBaseline] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [receptionNonce, setReceptionNonce] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const [opNonce, setOpNonce] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
 
   // Sync section when route changes
   useEffect(() => {
     setActiveSection(initialSection);
   }, [initialSection]);
 
-  // Listen to state updates and auto-load real Excel baseline if empty
+  // Listen to state updates, auto-load baseline if empty, and sync live owners from Supabase
   useEffect(() => {
+    let active = true;
     const refresh = () => setStore(getInventoryPurchaseState());
     window.addEventListener('rtw-inventory-purchase-updated', refresh);
     window.addEventListener('rtw-import-state-updated', refresh);
@@ -88,12 +98,31 @@ export function InventoryPurchaseModule({
     if (Object.keys(getInventoryPurchaseState().catalog).length === 0) {
       setIsSyncingBaseline(true);
       ensureExcelBaselineLoadedInInventory(actorEmail)
-        .then((synced) => setStore(synced))
+        .then((synced) => {
+          if (active) setStore(synced);
+        })
         .catch(() => {})
-        .finally(() => setIsSyncingBaseline(false));
+        .finally(() => {
+          if (active) setIsSyncingBaseline(false);
+        });
     }
 
+    fetchLiveOwnersFromSupabase()
+      .then((res) => {
+        if (!active || res.error || res.data.length === 0) return;
+        const synced = syncOwnersIntoInventoryStore(
+          res.data.map((o) => ({
+            id: o.id,
+            fullName: o.full_name,
+            status: o.status === 'inactive' ? 'inactive' : 'active'
+          }))
+        );
+        setStore(synced);
+      })
+      .catch(() => {});
+
     return () => {
+      active = false;
       window.removeEventListener('rtw-inventory-purchase-updated', refresh);
       window.removeEventListener('rtw-import-state-updated', refresh);
     };
@@ -130,7 +159,7 @@ export function InventoryPurchaseModule({
     sku: 'AUD-TWS-001-NEG',
     ownerId: '', // Regla: Nunca autoasignar propietario futuro
     qtyOrdered: 5,
-    unitPurchaseCostCop: '11500',
+    unitPurchaseCostCop: '',
     inboundShippingCop: '0',
     documentUrl: '',
     notes: ''
@@ -147,7 +176,7 @@ export function InventoryPurchaseModule({
     qtyGood: 1,
     qtyDefective: 0,
     qtyPendingInspection: 0,
-    unitPurchaseCostCop: '11500',
+    unitPurchaseCostCop: '',
     evidenceUrl: '',
     inspectorName: 'Operador Bodega',
     notes: ''
@@ -222,16 +251,60 @@ export function InventoryPurchaseModule({
   }, [store.allocations, selectedOwnerScope, categoryFilter, searchQuery]);
 
   useEffect(() => {
-    if (!selectedAllocId && filteredAllocations.length > 0) {
+    if (
+      filteredAllocations.length > 0 &&
+      (!selectedAllocId || !filteredAllocations.some((a) => a.id === selectedAllocId))
+    ) {
       setSelectedAllocId(filteredAllocations[0].id);
+    } else if (filteredAllocations.length === 0 && selectedAllocId !== '') {
+      setSelectedAllocId('');
     }
   }, [filteredAllocations, selectedAllocId]);
 
   const selectedCatalogItem: ProductVariantCatalogItem | undefined =
     store.catalog[selectedSkuForEdit] || catalogList[0];
 
+  useEffect(() => {
+    setFeaturesInput(selectedCatalogItem?.verifiedFeatures ?? '');
+    setDescriptionInput(selectedCatalogItem?.description ?? '');
+  }, [selectedCatalogItem?.sku, selectedCatalogItem?.verifiedFeatures, selectedCatalogItem?.description]);
+
   const selectedAllocation: LotOwnerAllocationRecord | undefined =
-    store.allocations.find((a) => a.id === selectedAllocId) || filteredAllocations[0];
+    filteredAllocations.find((a) => a.id === selectedAllocId) || filteredAllocations[0];
+
+  const activeReservationsForSelectedAlloc = useMemo(
+    () =>
+      selectedAllocation
+        ? store.reservations.filter(
+            (r) => r.lotAllocationId === selectedAllocation.id && r.status === 'active'
+          )
+        : [],
+    [store.reservations, selectedAllocation]
+  );
+
+  useEffect(() => {
+    if (opType === 'RELEASE_RESERVATION') {
+      setOpReservationId(activeReservationsForSelectedAlloc[0]?.id ?? '');
+    } else {
+      setOpReservationId('');
+    }
+  }, [selectedAllocation?.id, opType, activeReservationsForSelectedAlloc]);
+
+  useEffect(() => {
+    setOpToOwnerId('');
+  }, [selectedAllocation?.id, opType]);
+
+  const filteredPurchaseOrders = useMemo(() => {
+    if (selectedOwnerScope === 'ALL') return store.purchaseOrders;
+    return store.purchaseOrders.filter((po) =>
+      po.lines.some((ln) => ln.ownerId === selectedOwnerScope)
+    );
+  }, [store.purchaseOrders, selectedOwnerScope]);
+
+  const filteredMovements = useMemo(() => {
+    if (selectedOwnerScope === 'ALL') return store.movements;
+    return store.movements.filter((m) => m.ownerId === selectedOwnerScope);
+  }, [store.movements, selectedOwnerScope]);
 
   const kpis = useMemo(() => {
     let physical = 0;
@@ -274,19 +347,18 @@ export function InventoryPurchaseModule({
   // ================= HANDLERS =================
   const handleSaveProductMetadata = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCatalogItem) return;
+    if (!canWriteInventory) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} es de solo lectura para catálogo.`);
+      return;
+    }
+    if (!selectedCatalogItem || isSubmitting) return;
+    setIsSubmitting(true);
     try {
       updateProductVariantCatalogItem(
         selectedCatalogItem.sku,
         {
-          verifiedFeatures:
-            featuresInput.trim() !== ''
-              ? featuresInput
-              : selectedCatalogItem.verifiedFeatures,
-          description:
-            descriptionInput.trim() !== ''
-              ? descriptionInput
-              : selectedCatalogItem.description,
+          verifiedFeatures: featuresInput,
+          description: descriptionInput,
           photoUrlToAdd: photoUrlInput
         },
         actorEmail
@@ -300,11 +372,19 @@ export function InventoryPurchaseModule({
       );
     } catch (err) {
       notify('error', 'Error actualizando producto', err instanceof Error ? err.message : '');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleSaveSupplier = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteInventory) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} no puede modificar proveedores.`);
+      return;
+    }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const saved = registerOrUpdateSupplier(
         {
@@ -332,11 +412,19 @@ export function InventoryPurchaseModule({
       );
     } catch (err) {
       notify('error', 'Error en registro de proveedor', err instanceof Error ? err.message : '');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleCreatePurchaseOrder = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteInventory) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} no puede crear órdenes de compra.`);
+      return;
+    }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const costVal =
         poForm.unitPurchaseCostCop.trim() === ''
@@ -363,10 +451,12 @@ export function InventoryPurchaseModule({
         actorEmail
       );
       setStore(getInventoryPurchaseState());
+      const line1Cost = po.lines[0]?.unitPurchaseCostCop;
       setRecForm((prev) => ({
         ...prev,
         orderNumber: po.orderNumber,
         lineNumber: 1,
+        unitPurchaseCostCop: line1Cost !== null && line1Cost !== undefined ? String(line1Cost) : '',
         ownerId: '' // Mantiene vacío para obligar selección explícita también en recepción
       }));
       notify(
@@ -380,13 +470,21 @@ export function InventoryPurchaseModule({
         'Orden de compra rechazada',
         err instanceof Error ? err.message : 'Verifique los campos obligatorios'
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleExecutePurchaseReception = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWriteInventory) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} no puede ejecutar recepciones.`);
+      return;
+    }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
-      const idempKey = `IDEMP-REC-${recForm.orderNumber}-${recForm.lotId}-${Date.now()}`;
+      const idempKey = `IDEMP-REC-${recForm.orderNumber}-${recForm.lineNumber}-${recForm.lotId}-${receptionNonce}`;
       const costVal =
         recForm.unitPurchaseCostCop.trim() === ''
           ? null
@@ -411,6 +509,7 @@ export function InventoryPurchaseModule({
         actorEmail
       );
       setStore(getInventoryPurchaseState());
+      setReceptionNonce(`${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
       notify(
         'success',
         `Recepción confirmada (${res.order.status})`,
@@ -422,14 +521,25 @@ export function InventoryPurchaseModule({
         'Recepción rechazada por reglas de negocio',
         err instanceof Error ? err.message : 'Error de validación'
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleExecuteInventoryOperation = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAllocation) return;
+    if (!canWriteInventory) {
+      notify('error', 'Permiso denegado', `El rol ${effectiveRole} es de solo lectura en operaciones de inventario.`);
+      return;
+    }
+    if (opType === 'TRANSFER_OWNERSHIP' && !canTransferOwnership) {
+      notify('error', 'Operación exclusiva de ADMIN', 'Solo ADMIN puede transferir propiedad de lotes entre dueños.');
+      return;
+    }
+    if (!selectedAllocation || isSubmitting) return;
+    setIsSubmitting(true);
 
-    const idempKey = `IDEMP-OP-${opType}-${selectedAllocation.id}-V${selectedAllocation.lockVersion}-${Date.now()}`;
+    const idempKey = `IDEMP-OP-${opType}-${selectedAllocation.id}-V${selectedAllocation.lockVersion}-${opNonce}`;
     try {
       if (opType === 'QUALITY_INSPECT') {
         const res = txInspectQualityAllocation(
@@ -470,9 +580,7 @@ export function InventoryPurchaseModule({
       } else if (opType === 'RELEASE_RESERVATION') {
         const targetResId =
           opReservationId ||
-          store.reservations.find(
-            (r) => r.lotAllocationId === selectedAllocation.id && r.status === 'active'
-          )?.id ||
+          activeReservationsForSelectedAlloc[0]?.id ||
           '';
         const res = txReleaseStockReservation(
           {
@@ -557,12 +665,15 @@ export function InventoryPurchaseModule({
       }
 
       setStore(getInventoryPurchaseState());
+      setOpNonce(`${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     } catch (err) {
       notify(
         'error',
         'Operación transaccional bloqueada (ROLLBACK)',
         err instanceof Error ? err.message : 'Error de validación'
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -645,7 +756,7 @@ export function InventoryPurchaseModule({
           o.valuationCop
         ])
       );
-    } else {
+    } else if (activeReportType === 'BY_LOT') {
       exportRowsToCsvUtf8(
         'REAL_TWS_REPORTE_POR_LOTE.csv',
         ['ID_Lote', 'Asignacion', 'SKU', 'Producto', 'Propietario', 'Proveedor', 'Fisico', 'Apto', 'Defectuoso', 'Pendiente', 'Reservado', 'Disponible', 'Costo_Unit_COP', 'Estado_Conciliacion'],
@@ -666,8 +777,97 @@ export function InventoryPurchaseModule({
           l.reconciliationState
         ])
       );
+    } else if (activeReportType === 'BY_SUPPLIER') {
+      exportRowsToCsvUtf8(
+        'REAL_TWS_REPORTE_POR_PROVEEDOR.csv',
+        ['Codigo', 'Proveedor', 'Ordenes_Compra', 'Lotes_Asociados', 'Unid_Fisicas', 'Unid_Disponibles', 'Valorizacion_COP'],
+        reports.bySupplier.map((s) => [
+          s.supplierCode,
+          s.legalName,
+          s.purchaseOrdersCount,
+          s.lotsCount,
+          s.qtyPhysical,
+          s.qtyAvailable,
+          s.valuationCop
+        ])
+      );
+    } else {
+      exportRowsToCsvUtf8(
+        'REAL_TWS_REPORTE_POR_CALIDAD.csv',
+        ['Estado_Conciliacion', 'Lotes', 'Unid_Fisicas', 'Unid_Aptas', 'Unid_Defectuosas', 'Unid_Pendientes', 'Unid_Reservadas', 'Unid_Disponibles'],
+        reports.byQualityState.map((q) => [
+          q.reconciliationState,
+          q.lotsCount,
+          q.qtyPhysical,
+          q.qtyGood,
+          q.qtyDefective,
+          q.qtyPending,
+          q.qtyReserved,
+          q.qtyAvailable
+        ])
+      );
     }
   };
+
+  const visibleTabs = [
+    {
+      id: 'PRODUCTS' as InventoryModuleSection,
+      label: 'Productos',
+      icon: <Package size={14} />,
+      count: catalogList.length
+    },
+    ...(effectiveRole !== 'VIEWER'
+      ? [
+          {
+            id: 'SUPPLIERS' as InventoryModuleSection,
+            label: 'Proveedores',
+            icon: <Building2 size={14} />,
+            count: Object.keys(store.suppliers).length
+          },
+          {
+            id: 'PURCHASES_RECEPTIONS' as InventoryModuleSection,
+            label: 'Compras y Recepciones',
+            icon: <Truck size={14} />,
+            count: filteredPurchaseOrders.length
+          },
+          {
+            id: 'INVENTORY_OPERATIONS' as InventoryModuleSection,
+            label: 'Inventario',
+            icon: <Boxes size={14} />,
+            count: filteredAllocations.length
+          },
+          {
+            id: 'MOVEMENTS_LEDGER' as InventoryModuleSection,
+            label: 'Kardex',
+            icon: <History size={14} />,
+            count: filteredMovements.length
+          },
+          {
+            id: 'REPORTS' as InventoryModuleSection,
+            label: 'Reportes',
+            icon: <BarChart3 size={14} />
+          }
+        ]
+      : []),
+    ...(canImportExcel
+      ? [
+          {
+            id: 'EXCEL_IMPORT' as InventoryModuleSection,
+            label: 'Importar',
+            icon: <FileSpreadsheet size={14} />
+          },
+          {
+            id: 'TESTS_9' as InventoryModuleSection,
+            label: 'Diagnóstico',
+            icon: <ShieldCheck size={14} />
+          }
+        ]
+      : [])
+  ];
+
+  const effectiveActiveSection = visibleTabs.some((t) => t.id === activeSection)
+    ? activeSection
+    : 'PRODUCTS';
 
   return (
     <div className="module-container">
@@ -676,80 +876,40 @@ export function InventoryPurchaseModule({
         variant="dark"
         eyebrow="OPERACIONES · CATÁLOGO Y STOCK"
         title="Productos, Compras e Inventario"
-        subtitle="Administra tu catálogo por variantes, proveedores, recepciones y stock disponible por lote."
+        subtitle={
+          canWriteInventory
+            ? 'Administra tu catálogo por variantes, proveedores, recepciones y stock disponible por lote.'
+            : `Modo consulta (${effectiveRole}): visualización acotada sin permisos de escritura transaccional.`
+        }
         actions={
-          <button
-            type="button"
-            className="rtw-btn rtw-btn-gold btn-sm"
-            disabled={isSyncingBaseline}
-            onClick={async () => {
-              setIsSyncingBaseline(true);
-              const synced = await ensureExcelBaselineLoadedInInventory(actorEmail);
-              setStore(synced);
-              setIsSyncingBaseline(false);
-              notify(
-                'info',
-                'Base sincronizada',
-                'Catálogo y lotes iniciales actualizados correctamente.'
-              );
-            }}
-          >
-            <RotateCcw size={14} />
-            {isSyncingBaseline ? 'Sincronizando...' : 'Sincronizar base'}
-          </button>
+          canWriteInventory ? (
+            <button
+              type="button"
+              className="rtw-btn rtw-btn-gold btn-sm"
+              disabled={isSyncingBaseline}
+              onClick={async () => {
+                setIsSyncingBaseline(true);
+                const synced = await ensureExcelBaselineLoadedInInventory(actorEmail);
+                setStore(synced);
+                setIsSyncingBaseline(false);
+                notify(
+                  'info',
+                  'Base sincronizada',
+                  'Catálogo y lotes iniciales actualizados correctamente.'
+                );
+              }}
+            >
+              <RotateCcw size={14} />
+              {isSyncingBaseline ? 'Sincronizando...' : 'Sincronizar base'}
+            </button>
+          ) : null
         }
         bottomSlot={
           <SegmentedTabs<InventoryModuleSection>
             variant="dark"
-            value={activeSection}
+            value={effectiveActiveSection}
             onChange={setActiveSection}
-            items={[
-              {
-                id: 'PRODUCTS',
-                label: 'Productos',
-                icon: <Package size={14} />,
-                count: catalogList.length
-              },
-              {
-                id: 'SUPPLIERS',
-                label: 'Proveedores',
-                icon: <Building2 size={14} />,
-                count: Object.keys(store.suppliers).length
-              },
-              {
-                id: 'PURCHASES_RECEPTIONS',
-                label: 'Compras y Recepciones',
-                icon: <Truck size={14} />,
-                count: store.purchaseOrders.length
-              },
-              {
-                id: 'INVENTORY_OPERATIONS',
-                label: 'Inventario',
-                icon: <Boxes size={14} />,
-                count: filteredAllocations.length
-              },
-              {
-                id: 'MOVEMENTS_LEDGER',
-                label: 'Kardex',
-                icon: <History size={14} />,
-                count: store.movements.length
-              },
-              {
-                id: 'REPORTS',
-                label: 'Reportes',
-                icon: <BarChart3 size={14} />
-              },
-              {
-                id: 'EXCEL_IMPORT',
-                label: 'Importar',
-                icon: <FileSpreadsheet size={14} />
-              },
-              {
-                id: 'TESTS_9',
-                label: 'Diagnóstico',
-                icon: <ShieldCheck size={14} />
-              }
-            ]}
+            items={visibleTabs}
           />
         }
       />
@@ -799,7 +959,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 1: PRODUCTOS (CATÁLOGO MAESTRO, VARIANTES, SKU, FOTOS, HISTORIAL)
          ===================================================================== */}
-      {activeSection === 'PRODUCTS' && (
+      {effectiveActiveSection === 'PRODUCTS' && (
         <div className="rtw-split-grid">
           <section className="rtw-card">
             <div
@@ -816,7 +976,7 @@ export function InventoryPurchaseModule({
                 <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
                   Catálogo Maestro Universal y Variantes SKU ({filteredCatalog.length})
                 </h3>
-                <p style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
                   El producto maestro y el SKU son universales; un mismo SKU puede pertenecer a múltiples propietarios por lote.
                 </p>
               </div>
@@ -829,7 +989,7 @@ export function InventoryPurchaseModule({
                   style={{
                     padding: '6px 10px',
                     borderRadius: '6px',
-                    border: '1px solid #cbd5e1',
+                    border: '1px solid var(--rtw-border-light)',
                     fontSize: '0.79rem'
                   }}
                 />
@@ -839,7 +999,7 @@ export function InventoryPurchaseModule({
                   style={{
                     padding: '6px 10px',
                     borderRadius: '6px',
-                    border: '1px solid #cbd5e1',
+                    border: '1px solid var(--rtw-border-light)',
                     fontSize: '0.79rem'
                   }}
                 >
@@ -891,7 +1051,7 @@ export function InventoryPurchaseModule({
                       <td>{item.category}</td>
                       <td>
                         <div style={{ fontWeight: 700 }}>{item.productName}</div>
-                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--rtw-text-muted)' }}>
                           {item.brand} · {item.model} · Color: {item.color}
                         </div>
                       </td>
@@ -914,10 +1074,10 @@ export function InventoryPurchaseModule({
                 <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
                   Ficha Técnica, Fotografías e Historial — {selectedCatalogItem.sku}
                 </h3>
-                <div style={{ fontSize: '0.8rem', color: '#334155' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)' }}>
                   <strong>Producto:</strong> {selectedCatalogItem.productName} ({selectedCatalogItem.category})
                 </div>
-                <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
                   Ref. Fabricante: {selectedCatalogItem.manufacturerRef || '—'} · Ref. Proveedor:{' '}
                   {selectedCatalogItem.supplierRef || '—'}
                 </div>
@@ -926,13 +1086,14 @@ export function InventoryPurchaseModule({
                   Características Verificadas:
                   <input
                     type="text"
-                    value={featuresInput || selectedCatalogItem.verifiedFeatures}
+                    value={featuresInput}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setFeaturesInput(e.target.value)}
                     style={{
                       width: '100%',
                       padding: '7px 10px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--rtw-border-light)',
                       marginTop: '4px'
                     }}
                   />
@@ -942,13 +1103,14 @@ export function InventoryPurchaseModule({
                   Descripción Técnica:
                   <input
                     type="text"
-                    value={descriptionInput || selectedCatalogItem.description}
+                    value={descriptionInput}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setDescriptionInput(e.target.value)}
                     style={{
                       width: '100%',
                       padding: '7px 10px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--rtw-border-light)',
                       marginTop: '4px'
                     }}
                   />
@@ -960,12 +1122,13 @@ export function InventoryPurchaseModule({
                     type="text"
                     placeholder="https://... o ruta en bucket catalog-public"
                     value={photoUrlInput}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setPhotoUrlInput(e.target.value)}
                     style={{
                       width: '100%',
                       padding: '7px 10px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--rtw-border-light)',
                       marginTop: '4px'
                     }}
                   />
@@ -977,15 +1140,19 @@ export function InventoryPurchaseModule({
                   </div>
                 )}
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
-                  Guardar Ficha y Registrar en Historial
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={!canWriteInventory || isSubmitting}
+                >
+                  {isSubmitting ? 'Guardando...' : 'Guardar Ficha y Registrar en Historial'}
                 </button>
 
-                <div style={{ marginTop: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                <div style={{ marginTop: '10px', borderTop: '1px solid var(--rtw-border-light)', paddingTop: '10px' }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 800, marginBottom: '6px' }}>
                     Historial del SKU ({selectedCatalogItem.historyEvents.length})
                   </h4>
-                  <ul style={{ paddingLeft: '16px', fontSize: '0.75rem', color: '#475569' }}>
+                  <ul style={{ paddingLeft: '16px', fontSize: '0.75rem', color: 'var(--rtw-text-secondary)' }}>
                     {selectedCatalogItem.historyEvents.map((ev, i) => (
                       <li key={i}>
                         <strong>{ev.action}</strong> ({ev.actor}): {ev.detail}
@@ -1002,7 +1169,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 2: PROVEEDORES (REGISTRO, CONTACTO, REFERENCIAS, COMPRAS, HISTORIAL)
          ===================================================================== */}
-      {activeSection === 'SUPPLIERS' && (
+      {effectiveActiveSection === 'SUPPLIERS' && (
         <div className="rtw-split-grid">
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
@@ -1035,7 +1202,7 @@ export function InventoryPurchaseModule({
                       </td>
                       <td>{s.referenceCodes.join(', ') || '—'}</td>
                       <td style={{ fontWeight: 800 }}>{ordersCount}</td>
-                      <td style={{ fontSize: '0.73rem', color: '#475569' }}>
+                      <td style={{ fontSize: '0.73rem', color: 'var(--rtw-text-secondary)' }}>
                         {s.historyEvents[0]?.detail || 'Activo'}
                       </td>
                     </tr>
@@ -1056,7 +1223,7 @@ export function InventoryPurchaseModule({
                 value={supForm.supplierCode}
                 onChange={(e) => setSupForm({ ...supForm, supplierCode: e.target.value })}
                 required
-                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
               <input
                 type="text"
@@ -1064,31 +1231,35 @@ export function InventoryPurchaseModule({
                 value={supForm.legalName}
                 onChange={(e) => setSupForm({ ...supForm, legalName: e.target.value })}
                 required
-                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
               <input
                 type="text"
                 placeholder="Nombre de Contacto y Teléfono"
                 value={supForm.contactName}
                 onChange={(e) => setSupForm({ ...supForm, contactName: e.target.value })}
-                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
               <input
                 type="text"
                 placeholder="Códigos de Referencia (separados por coma)"
                 value={supForm.referenceCodesText}
                 onChange={(e) => setSupForm({ ...supForm, referenceCodesText: e.target.value })}
-                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
               <input
                 type="text"
                 placeholder="Observaciones / Condiciones comerciales"
                 value={supForm.notes}
                 onChange={(e) => setSupForm({ ...supForm, notes: e.target.value })}
-                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
               />
-              <button type="submit" className="rtw-btn rtw-btn-primary">
-                <Plus size={15} /> Guardar Proveedor
+              <button
+                type="submit"
+                className="rtw-btn rtw-btn-primary"
+                disabled={!canWriteInventory || isSubmitting}
+              >
+                <Plus size={15} /> {isSubmitting ? 'Guardando...' : 'Guardar Proveedor'}
               </button>
             </form>
           </section>
@@ -1098,15 +1269,15 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 3: COMPRAS Y RECEPCIONES (ÓRDENES, CONTEO, CALIDAD, LOTES, PROPIETARIOS)
          ===================================================================== */}
-      {activeSection === 'PURCHASES_RECEPTIONS' && (
+      {effectiveActiveSection === 'PURCHASES_RECEPTIONS' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '16px' }}>
             {/* FORMULARIO 1: CREAR ORDEN DE COMPRA */}
             <section className="rtw-card">
               <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '6px' }}>
                 1. Crear Orden de Compra (Sin Autoasignar Propietario)
               </h3>
-              <p style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: '10px' }}>
+              <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)', marginBottom: '10px' }}>
                 El selector de propietario inicia vacío para exigir selección explícita en cada nueva compra.
               </p>
               <form onSubmit={handleCreatePurchaseOrder} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1117,21 +1288,21 @@ export function InventoryPurchaseModule({
                     value={poForm.orderNumber}
                     onChange={(e) => setPoForm({ ...poForm, orderNumber: e.target.value })}
                     required
-                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                   <input
                     type="date"
                     value={poForm.orderDate}
                     onChange={(e) => setPoForm({ ...poForm, orderDate: e.target.value })}
                     required
-                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </div>
 
                 <select
                   value={poForm.supplierId}
                   onChange={(e) => setPoForm({ ...poForm, supplierId: e.target.value })}
-                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 >
                   {Object.values(store.suppliers).map((s) => (
                     <option key={s.id} value={s.id}>
@@ -1143,7 +1314,7 @@ export function InventoryPurchaseModule({
                 <select
                   value={poForm.sku}
                   onChange={(e) => setPoForm({ ...poForm, sku: e.target.value })}
-                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 >
                   {catalogList.map((c) => (
                     <option key={c.sku} value={c.sku}>
@@ -1180,7 +1351,7 @@ export function InventoryPurchaseModule({
                       min={1}
                       value={poForm.qtyOrdered}
                       onChange={(e) => setPoForm({ ...poForm, qtyOrdered: Number(e.target.value) })}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
@@ -1190,7 +1361,7 @@ export function InventoryPurchaseModule({
                       min={0}
                       value={poForm.unitPurchaseCostCop}
                       onChange={(e) => setPoForm({ ...poForm, unitPurchaseCostCop: e.target.value })}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                 </div>
@@ -1200,11 +1371,15 @@ export function InventoryPurchaseModule({
                   placeholder="Referencia Factura / Documento Soporte"
                   value={poForm.invoiceReference}
                   onChange={(e) => setPoForm({ ...poForm, invoiceReference: e.target.value })}
-                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
-                  Registrar Orden de Compra
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={!canWriteInventory || isSubmitting}
+                >
+                  {isSubmitting ? 'Registrando...' : 'Registrar Orden de Compra'}
                 </button>
               </form>
             </section>
@@ -1214,18 +1389,34 @@ export function InventoryPurchaseModule({
               <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '6px' }}>
                 2. Confirmar Recepción Física (Parcial o Completa) e Inspección
               </h3>
-              <p style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: '10px' }}>
+              <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)', marginBottom: '10px' }}>
                 Valida ecuación física (Recibido = Apto + Defectuoso + Pendiente), crea lote trazable y asigna al propietario seleccionado.
               </p>
               <form onSubmit={handleExecutePurchaseReception} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <select
                     value={recForm.orderNumber}
-                    onChange={(e) => setRecForm({ ...recForm, orderNumber: e.target.value })}
-                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    disabled={!canWriteInventory}
+                    onChange={(e) => {
+                      const nextOrderNum = e.target.value;
+                      const matchedPo = store.purchaseOrders.find(
+                        (po) => po.orderNumber === nextOrderNum
+                      );
+                      const firstLineCost = matchedPo?.lines[0]?.unitPurchaseCostCop;
+                      setRecForm({
+                        ...recForm,
+                        orderNumber: nextOrderNum,
+                        lineNumber: 1,
+                        unitPurchaseCostCop:
+                          firstLineCost !== null && firstLineCost !== undefined
+                            ? String(firstLineCost)
+                            : ''
+                      });
+                    }}
+                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   >
                     <option value="">-- Seleccione Orden de Compra --</option>
-                    {store.purchaseOrders.map((po) => (
+                    {filteredPurchaseOrders.map((po) => (
                       <option key={po.orderNumber} value={po.orderNumber}>
                         {po.orderNumber} ({po.status}) — {po.lines[0]?.sku} ({po.lines[0]?.qtyReceived}/{po.lines[0]?.qtyOrdered})
                       </option>
@@ -1236,14 +1427,16 @@ export function InventoryPurchaseModule({
                     type="text"
                     placeholder="Código de Lote (ej. LOT-REC-2026-01)"
                     value={recForm.lotId}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setRecForm({ ...recForm, lotId: e.target.value })}
                     required
-                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                   />
                 </div>
 
                 <select
                   value={recForm.ownerId}
+                  disabled={!canWriteInventory}
                   onChange={(e) => setRecForm({ ...recForm, ownerId: e.target.value })}
                   style={{
                     padding: '7px 10px',
@@ -1262,6 +1455,50 @@ export function InventoryPurchaseModule({
                   ))}
                 </select>
 
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
+                    Línea PO:
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={recForm.lineNumber}
+                      disabled={!canWriteInventory}
+                      onChange={(e) =>
+                        setRecForm({
+                          ...recForm,
+                          lineNumber: Math.max(1, Number(e.target.value) || 1)
+                        })
+                      }
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
+                    />
+                  </label>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
+                    Ubicación / Estante:
+                    <input
+                      type="text"
+                      value={recForm.storageBin}
+                      disabled={!canWriteInventory}
+                      onChange={(e) => setRecForm({ ...recForm, storageBin: e.target.value })}
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
+                    />
+                  </label>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
+                    Costo Unit. Compra (COP):
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="Vacío = PENDING_COST"
+                      value={recForm.unitPurchaseCostCop}
+                      disabled={!canWriteInventory}
+                      onChange={(e) =>
+                        setRecForm({ ...recForm, unitPurchaseCostCop: e.target.value })
+                      }
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
+                    />
+                  </label>
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
                     Recibido Hoy:
@@ -1269,10 +1506,11 @@ export function InventoryPurchaseModule({
                       type="number"
                       min={1}
                       value={recForm.qtyReceivedNow}
+                      disabled={!canWriteInventory}
                       onChange={(e) =>
                         setRecForm({ ...recForm, qtyReceivedNow: Number(e.target.value) })
                       }
-                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
@@ -1281,8 +1519,9 @@ export function InventoryPurchaseModule({
                       type="number"
                       min={0}
                       value={recForm.qtyGood}
+                      disabled={!canWriteInventory}
                       onChange={(e) => setRecForm({ ...recForm, qtyGood: Number(e.target.value) })}
-                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
@@ -1291,10 +1530,11 @@ export function InventoryPurchaseModule({
                       type="number"
                       min={0}
                       value={recForm.qtyDefective}
+                      disabled={!canWriteInventory}
                       onChange={(e) =>
                         setRecForm({ ...recForm, qtyDefective: Number(e.target.value) })
                       }
-                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                   <label style={{ fontSize: '0.72rem', fontWeight: 700 }}>
@@ -1303,10 +1543,11 @@ export function InventoryPurchaseModule({
                       type="number"
                       min={0}
                       value={recForm.qtyPendingInspection}
+                      disabled={!canWriteInventory}
                       onChange={(e) =>
                         setRecForm({ ...recForm, qtyPendingInspection: Number(e.target.value) })
                       }
-                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                     />
                   </label>
                 </div>
@@ -1315,12 +1556,18 @@ export function InventoryPurchaseModule({
                   type="text"
                   placeholder="URL Evidencia Fotográfica / Acta de Recepción"
                   value={recForm.evidenceUrl}
+                  disabled={!canWriteInventory}
                   onChange={(e) => setRecForm({ ...recForm, evidenceUrl: e.target.value })}
-                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--rtw-border-light)' }}
                 />
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
-                  <ClipboardCheck size={15} /> Confirmar Recepción Transaccional
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={!canWriteInventory || isSubmitting}
+                >
+                  <ClipboardCheck size={15} />{' '}
+                  {isSubmitting ? 'Procesando...' : 'Confirmar Recepción Transaccional'}
                 </button>
               </form>
             </section>
@@ -1329,10 +1576,10 @@ export function InventoryPurchaseModule({
           {/* TABLA DE ÓRDENES DE COMPRA */}
           <section className="rtw-card">
             <h3 style={{ fontSize: '0.96rem', fontWeight: 800, marginBottom: '10px' }}>
-              Órdenes de Compra Registradas ({store.purchaseOrders.length})
+              Órdenes de Compra Registradas ({filteredPurchaseOrders.length})
             </h3>
-            {store.purchaseOrders.length === 0 ? (
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            {filteredPurchaseOrders.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 No existen órdenes de compra adicionales posteriores al inventario físico inicial. Utilice el formulario superior para registrar una orden real.
               </p>
             ) : (
@@ -1350,27 +1597,35 @@ export function InventoryPurchaseModule({
                   </tr>
                 </thead>
                 <tbody>
-                  {store.purchaseOrders.map((po) =>
-                    po.lines.map((ln) => (
-                      <tr key={ln.id}>
-                        <td style={{ fontWeight: 800 }}>{po.orderNumber}</td>
-                        <td>{po.orderDate}</td>
-                        <td>{po.supplierName}</td>
-                        <td>
-                          <code>{ln.sku}</code> ({ln.productName})
-                        </td>
-                        <td>
-                          <span className="rtw-badge rtw-badge-gold">{ln.ownerId}</span>
-                        </td>
-                        <td style={{ fontWeight: 800 }}>
-                          {ln.qtyReceived} / {ln.qtyOrdered} unid.
-                        </td>
-                        <td>{formatCOP(ln.unitPurchaseCostCop)}</td>
-                        <td>
-                          <span className="rtw-badge rtw-badge-success">{po.status}</span>
-                        </td>
-                      </tr>
-                    ))
+                  {filteredPurchaseOrders.map((po) =>
+                    po.lines
+                      .filter(
+                        (ln) => selectedOwnerScope === 'ALL' || ln.ownerId === selectedOwnerScope
+                      )
+                      .map((ln) => (
+                        <tr key={ln.id}>
+                          <td style={{ fontWeight: 800 }}>{po.orderNumber}</td>
+                          <td>{po.orderDate}</td>
+                          <td>{po.supplierName}</td>
+                          <td>
+                            <code>{ln.sku}</code> ({ln.productName})
+                          </td>
+                          <td>
+                            <span className="rtw-badge rtw-badge-gold">{ln.ownerId}</span>
+                          </td>
+                          <td style={{ fontWeight: 800 }}>
+                            {ln.qtyReceived} / {ln.qtyOrdered} unid.
+                          </td>
+                          <td>
+                            {ln.unitPurchaseCostCop === null
+                              ? 'PENDING_COST'
+                              : formatCOP(ln.unitPurchaseCostCop)}
+                          </td>
+                          <td>
+                            <span className="rtw-badge rtw-badge-success">{po.status}</span>
+                          </td>
+                        </tr>
+                      ))
                   )}
                 </tbody>
               </table>
@@ -1382,7 +1637,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 4: INVENTARIO POR LOTE Y OPERACIONES TRANSACCIONALES
          ===================================================================== */}
-      {activeSection === 'INVENTORY_OPERATIONS' && (
+      {effectiveActiveSection === 'INVENTORY_OPERATIONS' && (
         <div className="rtw-split-grid">
           <section className="rtw-card">
             <div
@@ -1399,7 +1654,7 @@ export function InventoryPurchaseModule({
                 <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
                   Existencias Separadas por Lote y Propietario ({filteredAllocations.length})
                 </h3>
-                <p style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                <p style={{ fontSize: '0.76rem', color: 'var(--rtw-text-muted)' }}>
                   Seleccione cualquier lote para ejecutar Inspección de Calidad, Reserva, Liberación, Despacho, Devolución, Transferencia o Ajuste.
                 </p>
               </div>
@@ -1411,7 +1666,7 @@ export function InventoryPurchaseModule({
                 style={{
                   padding: '6px 10px',
                   borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid var(--rtw-border-light)',
                   fontSize: '0.79rem',
                   minWidth: '230px'
                 }}
@@ -1453,7 +1708,7 @@ export function InventoryPurchaseModule({
                       </td>
                       <td>
                         <div style={{ fontWeight: 800 }}>{a.sku}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--rtw-text-muted)' }}>
                           {a.productName}
                         </div>
                       </td>
@@ -1495,8 +1750,8 @@ export function InventoryPurchaseModule({
                   style={{
                     padding: '10px',
                     borderRadius: '8px',
-                    background: '#f8fafc',
-                    border: '1px solid #cbd5e1',
+                    background: 'var(--rtw-bg-subtle)',
+                    border: '1px solid var(--rtw-border-light)',
                     fontSize: '0.78rem'
                   }}
                 >
@@ -1525,7 +1780,7 @@ export function InventoryPurchaseModule({
                       width: '100%',
                       padding: '8px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--rtw-border-light)',
                       marginTop: '4px',
                       fontWeight: 700
                     }}
@@ -1545,14 +1800,44 @@ export function InventoryPurchaseModule({
                     <option value="CUSTOMER_RETURN">
                       5. Procesar Devolución de Cliente (customer_return)
                     </option>
-                    <option value="TRANSFER_OWNERSHIP">
-                      6. Transferir Propiedad entre Dueños (transfer_out / transfer_in)
-                    </option>
+                    {canTransferOwnership && (
+                      <option value="TRANSFER_OWNERSHIP">
+                        6. Transferir Propiedad entre Dueños (transfer_out / transfer_in)
+                      </option>
+                    )}
                     <option value="ADJUSTMENT">
                       7. Ajuste Conciliado de Inventario (reconciliation_adjustment)
                     </option>
                   </select>
                 </label>
+
+                {opType === 'RELEASE_RESERVATION' && (
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                    Reserva Activa a Liberar:
+                    <select
+                      value={opReservationId}
+                      disabled={!canWriteInventory || activeReservationsForSelectedAlloc.length === 0}
+                      onChange={(e) => setOpReservationId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '7px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--rtw-border-light)',
+                        marginTop: '4px'
+                      }}
+                    >
+                      {activeReservationsForSelectedAlloc.length === 0 ? (
+                        <option value="">-- Sin reservas activas en este lote --</option>
+                      ) : (
+                        activeReservationsForSelectedAlloc.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.reservationCode} · {r.qtyReserved} u. · Ref: {r.salesOrderRef}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                )}
 
                 {opType !== 'RELEASE_RESERVATION' && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1570,7 +1855,7 @@ export function InventoryPurchaseModule({
                           width: '100%',
                           padding: '7px',
                           borderRadius: '6px',
-                          border: '1px solid #cbd5e1'
+                          border: '1px solid var(--rtw-border-light)'
                         }}
                       />
                     </label>
@@ -1588,7 +1873,7 @@ export function InventoryPurchaseModule({
                             width: '100%',
                             padding: '7px',
                             borderRadius: '6px',
-                            border: '1px solid #cbd5e1'
+                            border: '1px solid var(--rtw-border-light)'
                           }}
                         />
                       </label>
@@ -1608,7 +1893,7 @@ export function InventoryPurchaseModule({
                         width: '100%',
                         padding: '7px',
                         borderRadius: '6px',
-                        border: '1px solid #cbd5e1'
+                        border: '1px solid var(--rtw-border-light)'
                       }}
                     >
                       <option value="good_restock">Apta para reingreso (customer_return_restock)</option>
@@ -1620,18 +1905,27 @@ export function InventoryPurchaseModule({
                 {opType === 'TRANSFER_OWNERSHIP' && (
                   <label style={{ fontSize: '0.75rem', fontWeight: 700 }}>
                     Propietario Destino (Explícito):
-                    <input
-                      type="text"
-                      placeholder="Código Propietario Destino (ej. OWN-0002)"
+                    <select
                       value={opToOwnerId}
+                      disabled={!canWriteInventory || !canTransferOwnership}
                       onChange={(e) => setOpToOwnerId(e.target.value)}
                       style={{
                         width: '100%',
                         padding: '7px',
                         borderRadius: '6px',
-                        border: '1px solid #cbd5e1'
+                        border: opToOwnerId ? '1px solid #166534' : '2px solid #d4af37',
+                        marginTop: '4px'
                       }}
-                    />
+                    >
+                      <option value="">-- Seleccione propietario destino --</option>
+                      {store.owners
+                        .filter((o) => o.id !== selectedAllocation.ownerId && o.status === 'active')
+                        .map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.id} — {o.fullName}
+                          </option>
+                        ))}
+                    </select>
                   </label>
                 )}
 
@@ -1640,12 +1934,13 @@ export function InventoryPurchaseModule({
                   <input
                     type="text"
                     value={opRefCode}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setOpRefCode(e.target.value)}
                     style={{
                       width: '100%',
                       padding: '7px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1'
+                      border: '1px solid var(--rtw-border-light)'
                     }}
                   />
                 </label>
@@ -1655,19 +1950,30 @@ export function InventoryPurchaseModule({
                   <input
                     type="text"
                     value={opReason}
+                    disabled={!canWriteInventory}
                     onChange={(e) => setOpReason(e.target.value)}
                     required
                     style={{
                       width: '100%',
                       padding: '7px',
                       borderRadius: '6px',
-                      border: '1px solid #cbd5e1'
+                      border: '1px solid var(--rtw-border-light)'
                     }}
                   />
                 </label>
 
-                <button type="submit" className="rtw-btn rtw-btn-primary">
-                  <ArrowRightLeft size={15} /> Ejecutar Transacción Atómica
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={
+                    !canWriteInventory ||
+                    isSubmitting ||
+                    (opType === 'RELEASE_RESERVATION' &&
+                      activeReservationsForSelectedAlloc.length === 0)
+                  }
+                >
+                  <ArrowRightLeft size={15} />{' '}
+                  {isSubmitting ? 'Ejecutando...' : 'Ejecutar Transacción Atómica'}
                 </button>
               </form>
             ) : null}
@@ -1678,15 +1984,15 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 5: KARDEX INMUTABLE DE MOVIMIENTOS (stock_movements)
          ===================================================================== */}
-      {activeSection === 'MOVEMENTS_LEDGER' && (
+      {effectiveActiveSection === 'MOVEMENTS_LEDGER' && (
         <section className="rtw-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
             <Lock size={18} color="#d4af37" />
             <div>
               <h3 style={{ fontSize: '0.96rem', fontWeight: 800 }}>
-                Libro Inmutable de Movimientos de Inventario (public.stock_movements — {store.movements.length})
+                Libro Inmutable de Movimientos de Inventario (public.stock_movements — {filteredMovements.length})
               </h3>
-              <p style={{ fontSize: '0.78rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--rtw-text-muted)' }}>
                 Regla Crítica: Append-only. Prohibido borrar o editar movimientos históricos. Toda corrección se realiza mediante nuevo movimiento compensatorio.
               </p>
             </div>
@@ -1711,7 +2017,7 @@ export function InventoryPurchaseModule({
                 </tr>
               </thead>
               <tbody>
-                {store.movements.map((m) => (
+                {filteredMovements.map((m) => (
                   <tr key={m.id}>
                     <td>#{m.movementSeq}</td>
                     <td>
@@ -1732,7 +2038,7 @@ export function InventoryPurchaseModule({
                     </td>
                     <td style={{ fontSize: '0.72rem' }}>
                       <div>{m.reason}</div>
-                      <code style={{ color: '#64748b' }}>{m.idempotencyKey}</code>
+                      <code style={{ color: 'var(--rtw-text-muted)' }}>{m.idempotencyKey}</code>
                     </td>
                   </tr>
                 ))}
@@ -1745,7 +2051,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 6: LOS 6 REPORTES ANALÍTICOS OFICIALES
          ===================================================================== */}
-      {activeSection === 'REPORTS' && (
+      {effectiveActiveSection === 'REPORTS' && (
         <section className="rtw-card">
           <div
             style={{
@@ -2025,7 +2331,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 7: LAS 9 PRUEBAS OBLIGATORIAS EN SANDBOX AISLADO
          ===================================================================== */}
-      {activeSection === 'TESTS_9' && (
+      {effectiveActiveSection === 'TESTS_9' && (
         <section className="rtw-card">
           <div
             style={{
@@ -2041,7 +2347,7 @@ export function InventoryPurchaseModule({
               <h3 style={{ fontSize: '0.98rem', fontWeight: 800 }}>
                 Batería Automatizada de las 9 Pruebas Obligatorias (Sandbox en Memoria)
               </h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--rtw-text-muted)' }}>
                 Verifica recepción parcial, recepción completa, defectuosos, dos propietarios con mismo SKU, venta de última unidad concurrente, reserva cancelada, devolución, transferencia de propiedad y ajuste sin introducir datos ficticios en producción.
               </p>
             </div>
@@ -2055,11 +2361,11 @@ export function InventoryPurchaseModule({
           </div>
 
           {testResults.length === 0 ? (
-            <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--rtw-text-muted)' }}>
               Haga clic en "Ejecutar las 9 Pruebas Obligatorias" para verificar todos los procedimientos transaccionales.
             </p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '12px' }}>
               {testResults.map((tr) => (
                 <div
                   key={tr.testId}
@@ -2067,11 +2373,11 @@ export function InventoryPurchaseModule({
                     padding: '12px 14px',
                     borderRadius: '8px',
                     border: tr.passed ? '1px solid #86efac' : '1px solid #fca5a5',
-                    background: tr.passed ? '#f0fdf4' : '#fef2f2'
+                    background: tr.passed ? 'var(--rtw-success-bg)' : 'var(--rtw-danger-bg)'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>
+                    <span style={{ fontWeight: 800, fontSize: '0.84rem', color: 'var(--rtw-text-primary)' }}>
                       {tr.title}
                     </span>
                     <span
@@ -2087,13 +2393,13 @@ export function InventoryPurchaseModule({
                       {tr.passed ? 'PASSED' : 'FAILED'}
                     </span>
                   </div>
-                  <p style={{ fontSize: '0.75rem', color: '#334155', marginBottom: '5px' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--rtw-text-secondary)', marginBottom: '5px' }}>
                     {tr.scenario}
                   </p>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--rtw-text-primary)', marginBottom: '4px' }}>
                     Resultado: {tr.actual}
                   </div>
-                  <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.72rem', color: '#475569' }}>
+                  <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.72rem', color: 'var(--rtw-text-secondary)' }}>
                     {tr.details.map((d, idx) => (
                       <li key={idx}>{d}</li>
                     ))}
@@ -2108,7 +2414,7 @@ export function InventoryPurchaseModule({
       {/* =====================================================================
           SECCIÓN 8: MOTOR DE IMPORTACIÓN EXCEL INTEGRADO
          ===================================================================== */}
-      {activeSection === 'EXCEL_IMPORT' && <ExcelImportModule />}
+      {effectiveActiveSection === 'EXCEL_IMPORT' && <ExcelImportModule />}
     </div>
   );
 }

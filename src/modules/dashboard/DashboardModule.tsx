@@ -215,9 +215,8 @@ export function DashboardModule() {
     },
     {
       key: 'detail',
-      header: '',
+      header: 'Detalle',
       align: 'right',
-      hideOnMobile: true,
       render: (r) => (
         <button
           type="button"
@@ -453,7 +452,11 @@ export function DashboardModule() {
           staggerIndex={4}
           label={`Ventas (${periodFilter === 'ALL' ? 'Histórico' : periodFilter})`}
           value={formatCOP(periodSalesCop)}
-          sub={`${formatInteger(periodUnitsSold)} u. · Utilidad: ${formatCOP(snapshot.totals.attributableProfitCop)}`}
+          sub={
+            periodFilter === 'ALL'
+              ? `${formatInteger(periodUnitsSold)} u. · Utilidad: ${formatCOP(snapshot.totals.attributableProfitCop)}`
+              : `${formatInteger(periodUnitsSold)} u. en período · Utilidad hist.: ${formatCOP(snapshot.totals.attributableProfitCop)}`
+          }
           icon={<TrendingUp size={16} />}
         />
 
@@ -471,7 +474,7 @@ export function DashboardModule() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(330px, 100%), 1fr))',
           gap: '18px'
         }}
       >
@@ -501,12 +504,12 @@ export function DashboardModule() {
             <div style={{ width: '100%', height: 270 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartByOwner}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(15, 23, 42, 0.08)" />
-                  <XAxis dataKey="ownerLabel" tick={{ fontSize: 11, fill: '#475569' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#475569' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--rtw-chart-grid)" />
+                  <XAxis dataKey="ownerLabel" tick={{ fontSize: 11, fill: 'var(--rtw-chart-axis)' }} />
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--rtw-chart-axis)' }} />
                   <Tooltip
                     contentStyle={{
-                      background: 'rgba(13, 17, 25, 0.92)',
+                      background: 'rgba(13, 17, 25, 0.94)',
                       border: '1px solid rgba(212, 175, 55, 0.45)',
                       borderRadius: '12px',
                       color: '#f8fafc',
@@ -514,9 +517,9 @@ export function DashboardModule() {
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Bar dataKey="physicalUnits" name="Físicas" fill="#151c27" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="availableUnits" name="Disponibles" fill="#16a34a" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="pendingInspection" name="En Revisión" fill="#d4af37" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="physicalUnits" name="Físicas" fill="var(--rtw-chart-bar-primary)" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="availableUnits" name="Disponibles" fill="var(--rtw-chart-bar-available)" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="pendingInspection" name="En Revisión" fill="var(--rtw-chart-bar-gold)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

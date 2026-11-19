@@ -112,7 +112,7 @@ export function AuditModule() {
       key: 'reason',
       header: 'Detalle / Motivo',
       render: (row) => (
-        <span style={{ fontSize: '0.8rem', color: '#334155' }}>
+        <span style={{ fontSize: '0.8rem', color: 'var(--rtw-text-secondary)' }}>
           {row.reason || 'Registro automático por trigger PostgreSQL'}
         </span>
       )
@@ -161,7 +161,7 @@ export function AuditModule() {
       render: (row) => (
         <div style={{ fontSize: '0.78rem' }}>
           <div>{row.reason}</div>
-          <code style={{ color: '#475569' }}>{row.dbEnforcementLayer}</code>
+          <code style={{ color: 'var(--rtw-text-secondary)' }}>{row.dbEnforcementLayer}</code>
         </div>
       )
     }
@@ -179,10 +179,11 @@ export function AuditModule() {
           <button
             type="button"
             className="rtw-btn rtw-btn-ghost-dark btn-sm"
+            disabled={loadingDb}
             onClick={() => void loadDbAuditLogs()}
           >
-            <RefreshCw size={14} />
-            Actualizar
+            <RefreshCw size={14} className={loadingDb ? 'rtw-spin' : undefined} />
+            {loadingDb ? 'Actualizando...' : 'Actualizar'}
           </button>
         }
       />

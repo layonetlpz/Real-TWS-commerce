@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Search, RotateCcw, X } from 'lucide-react';
 
 interface FilterBarProps {
@@ -19,12 +20,14 @@ export function FilterBar({
   onReset,
   placeholder = 'Buscar por código, SKU, lote o referencia...'
 }: FilterBarProps) {
+  const searchInputId = useId();
+  const statusSelectId = useId();
   const hasFilters = searchQuery.trim() !== '' || statusFilter !== (statusOptions[0]?.value ?? 'ALL');
 
   return (
     <div className="rtw-filter-bar" role="search" aria-label="Filtros de tabla">
       <div className="rtw-field" style={{ flex: '1 1 260px' }}>
-        <label className="rtw-label" htmlFor="table-search-input">
+        <label className="rtw-label" htmlFor={searchInputId}>
           Buscar
         </label>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -33,9 +36,9 @@ export function FilterBar({
             style={{ position: 'absolute', left: '11px', color: 'var(--rtw-text-muted)', pointerEvents: 'none' }}
           />
           <input
-            id="table-search-input"
+            id={searchInputId}
             type="search"
-            className="rtw-input"
+            className="rtw-input rtw-search-input"
             style={{ width: '100%', paddingLeft: '34px', paddingRight: searchQuery ? '32px' : '12px' }}
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -64,11 +67,11 @@ export function FilterBar({
       </div>
 
       <div className="rtw-field" style={{ minWidth: '200px' }}>
-        <label className="rtw-label" htmlFor="table-status-select">
+        <label className="rtw-label" htmlFor={statusSelectId}>
           Estado
         </label>
         <select
-          id="table-status-select"
+          id={statusSelectId}
           className="rtw-select"
           value={statusFilter}
           onChange={(e) => onStatusFilterChange(e.target.value)}

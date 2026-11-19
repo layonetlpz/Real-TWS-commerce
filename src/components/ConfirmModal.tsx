@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 interface ConfirmModalProps {
@@ -8,6 +8,7 @@ interface ConfirmModalProps {
   ruleReminder?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirming?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,17 +20,29 @@ export function ConfirmModal({
   ruleReminder,
   confirmLabel = 'Confirmar',
   cancelLabel = 'Cancelar',
+  confirming = false,
   onConfirm,
   onCancel
 }: ConfirmModalProps) {
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    cancelBtnRef.current?.focus();
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Escape' && !confirming) onCancel();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onCancel]);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = prevOverflow;
+      prevFocus?.focus?.();
+    };
+  }, [open, confirming, onCancel]);
 
   if (!open) return null;
 
@@ -40,7 +53,7 @@ export function ConfirmModal({
       aria-modal="true"
       aria-labelledby="rtw-modal-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+        if (e.target === e.currentTarget && !confirming) onCancel();
       }}
     >
       <div className="rtw-modal">
@@ -78,6 +91,7 @@ export function ConfirmModal({
             type="button"
             className="rtw-btn rtw-btn-outline btn-sm"
             onClick={onCancel}
+            disabled={confirming}
             aria-label="Cerrar modal"
           >
             <X size={16} />
@@ -112,9 +126,11 @@ export function ConfirmModal({
           }}
         >
           <button
+            ref={cancelBtnRef}
             type="button"
             className="rtw-btn rtw-btn-outline"
             onClick={onCancel}
+            disabled={confirming}
           >
             {cancelLabel}
           </button>
@@ -122,9 +138,10 @@ export function ConfirmModal({
             type="button"
             className="rtw-btn rtw-btn-primary"
             onClick={onConfirm}
+            disabled={confirming}
           >
             <CheckCircle2 size={16} />
-            {confirmLabel}
+            {confirming ? 'Procesando...' : confirmLabel}
           </button>
         </div>
       </div>

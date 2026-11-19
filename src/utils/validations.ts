@@ -10,11 +10,27 @@ export interface ReceptionDraftInput {
   qtyPending: number;
 }
 
+export function isValidPositiveInt(value: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0;
+}
+
+export function isValidNonNegativeInt(value: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+export function isValidNonNegativeAmount(value: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+export function isValidEmailFormat(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
+
 /**
  * Valida las reglas obligatorias 6, 8, 11 y 12:
  * - Todo nuevo registro exige propietario explícito (nunca preasignar Eberto automáticamente).
- * - Cantidad física total = apta + defectuosa + pendiente.
- * - No permitir cantidades negativas.
+ * - Cantidad física total = apta + defectuosa + pendiente (enteros no negativos).
+ * - No permitir cantidades negativas, decimales ni NaN.
  */
 export function validateReceptionDraft(input: ReceptionDraftInput): ValidationResult {
   const errors: Record<string, string> = {};
@@ -29,12 +45,12 @@ export function validateReceptionDraft(input: ReceptionDraftInput): ValidationRe
     errors.ownerId = 'Debe seleccionar explícitamente un propietario activo.';
   }
   if (
-    input.qtyPhysical < 0 ||
-    input.qtyGood < 0 ||
-    input.qtyDefective < 0 ||
-    input.qtyPending < 0
+    !isValidNonNegativeInt(input.qtyPhysical) ||
+    !isValidNonNegativeInt(input.qtyGood) ||
+    !isValidNonNegativeInt(input.qtyDefective) ||
+    !isValidNonNegativeInt(input.qtyPending)
   ) {
-    errors.quantities = 'No se permiten cantidades negativas en ningún estado de stock.';
+    errors.quantities = 'Todas las cantidades deben ser números enteros mayores o iguales a cero.';
   } else {
     const sumBreakdown = input.qtyGood + input.qtyDefective + input.qtyPending;
     if (input.qtyPhysical !== sumBreakdown) {

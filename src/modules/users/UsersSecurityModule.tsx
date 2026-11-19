@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   KeyRound,
@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import {
+  ALL_USER_ROLES,
   ROLES_CATALOG,
   ROUTE_PERMISSIONS,
   evaluateSensitiveOperation
@@ -24,7 +25,10 @@ import {
   requestPrivateDocumentSignedUrl,
   runMandatorySecurityTests
 } from '../../services/authService';
-import { getSystemBaselineSummary } from '../../services/systemService';
+import {
+  fetchLiveOwnersFromSupabase,
+  type DbOwnerRow
+} from '../../services/supabaseDataBridge';
 import { AuthPortalCard } from '../auth/AuthScreens';
 import {
   GlassCard,
@@ -38,13 +42,8 @@ import type {
   UserRole
 } from '../../types/domain';
 
-const ALL_ROLES: UserRole[] = [
-  'ADMIN',
-  'INVENTORY_OPERATOR',
-  'SALES_OPERATOR',
-  'MARKETING_OPERATOR',
-  'OWNER'
-];
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function UsersSecurityModule() {
   const {
@@ -60,12 +59,12 @@ export function UsersSecurityModule() {
     logGuardEvent
   } = useAuth();
   const { notify } = useNotifications();
-  const baseline = getSystemBaselineSummary();
 
   const [activeTab, setActiveTab] = useState<'PROFILE' | 'USERS' | 'SECURITY'>('PROFILE');
 
-  // Lista real de usuarios desde public.profiles (cuando Supabase está conectado)
+  // Lista real de usuarios desde public.profiles y propietarios reales desde public.owners
   const [managedProfiles, setManagedProfiles] = useState<UserProfile[]>([]);
+  const [liveOwners, setLiveOwners] = useState<DbOwnerRow[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
 
   // Formulario administrativo para asignar rol y permisos (RPC fn_admin_update_user_role_and_access)
@@ -76,6 +75,8 @@ export function UsersSecurityModule() {
   const [isActiveAccount, setIsActiveAccount] = useState(true);
   const [adminReason, setAdminReason] = useState('');
   const [adminFormFeedback, setAdminFormFeedback] = useState<string | null>(null);
+  const [savingAdminRole, setSavingAdminRole] = useState(false);
+  const [checkingPrivateDoc, setCheckingPrivateDoc] = useState(false);
 
   // Resultados de las 7 pruebas obligatorias de seguridad
   const [testResults, setTestResults] = useState<SecurityTestScenarioResult[]>(
@@ -85,16 +86,32 @@ export function UsersSecurityModule() {
   // Resultado de prueba interactiva de documento privado
   const [privateDocStatus, setPrivateDocStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isSupabaseReady && activeEffectiveRole === 'ADMIN') {
-      setLoadingProfiles(true);
-      listManagedUserProfiles()
-        .then(({ profiles }) => {
-          setManagedProfiles(profiles);
-        })
-        .finally(() => setLoadingProfiles(false));
+  const loadAdminDirectories = useCallback(async () => {
+    if (!isSupabaseReady || activeEffectiveRole !== 'ADMIN') return;
+    setLoadingProfiles(true);
+    try {
+      const [profilesRes, ownersRes] = await Promise.all([
+        listManagedUserProfiles(),
+        fetchLiveOwnersFromSupabase()
+      ]);
+      if (profilesRes.error) {
+        notify('error', 'Usuarios', profilesRes.error);
+      } else {
+        setManagedProfiles(profilesRes.profiles);
+      }
+      if (ownersRes.error) {
+        notify('warning', 'Propietarios', ownersRes.error);
+      } else {
+        setLiveOwners(ownersRes.data);
+      }
+    } finally {
+      setLoadingProfiles(false);
     }
-  }, [isSupabaseReady, activeEffectiveRole]);
+  }, [isSupabaseReady, activeEffectiveRole, notify]);
+
+  useEffect(() => {
+    void loadAdminDirectories();
+  }, [loadAdminDirectories]);
 
   const effectiveProfileContext: UserProfile = userProfile ?? {
     id: 'local-rbac-context',
@@ -121,6 +138,7 @@ export function UsersSecurityModule() {
 
   const handleAdminRoleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingAdminRole) return;
     setAdminFormFeedback(null);
 
     const permCheck = evaluateSensitiveOperation(
@@ -141,8 +159,8 @@ export function UsersSecurityModule() {
       return;
     }
 
-    if (!targetUserId.trim()) {
-      setAdminFormFeedback('Debe indicar el UUID del usuario registrado en auth.users / public.profiles.');
+    if (!targetUserId.trim() || !UUID_REGEX.test(targetUserId.trim())) {
+      setAdminFormFeedback('Indica un UUID válido del usuario registrado en auth.users / public.profiles.');
       return;
     }
 
@@ -158,46 +176,60 @@ export function UsersSecurityModule() {
       return;
     }
 
-    const { error } = await adminUpdateUserRoleAndAccess({
-      targetUserId: targetUserId.trim(),
-      newRole,
-      linkedOwnerId: newRole === 'OWNER' ? linkedOwnerId : null,
-      ownerPortalEnabled: newRole === 'OWNER' ? ownerPortalEnabled : false,
-      isActive: isActiveAccount,
-      reason: adminReason.trim()
-    });
+    setSavingAdminRole(true);
+    try {
+      const { error } = await adminUpdateUserRoleAndAccess({
+        targetUserId: targetUserId.trim(),
+        newRole,
+        linkedOwnerId: newRole === 'OWNER' ? linkedOwnerId : null,
+        ownerPortalEnabled: newRole === 'OWNER' ? ownerPortalEnabled : false,
+        isActive: isActiveAccount,
+        reason: adminReason.trim()
+      });
 
-    if (error) {
-      setAdminFormFeedback(error);
-      notify('info', 'Validación de Servidor RPC', error);
-      return;
+      if (error) {
+        setAdminFormFeedback(error);
+        notify('error', 'Validación de Servidor RPC', error);
+        return;
+      }
+
+      setAdminFormFeedback('Permisos actualizados correctamente en public.profiles y registrados en audit_logs.');
+      notify('success', 'Rol Actualizado', 'Cambio aplicado mediante RPC en servidor.');
+      await loadAdminDirectories();
+    } finally {
+      setSavingAdminRole(false);
     }
-
-    setAdminFormFeedback('Permisos actualizados correctamente en public.profiles y registrados en audit_logs.');
-    notify('success', 'Rol Actualizado', 'Cambio aplicado mediante RPC en servidor.');
   };
 
   const handleTestPrivateDocument = async () => {
-    const res = await requestPrivateDocumentSignedUrl({
-      profile: effectiveProfileContext,
-      storagePath: 'facturas/REC-INI-2026-01.pdf',
-      documentOwnerId: 'OWN-0001',
-      sessionExpired: authStatus === 'SESSION_EXPIRED'
-    });
+    if (checkingPrivateDoc) return;
+    setCheckingPrivateDoc(true);
+    try {
+      const res = await requestPrivateDocumentSignedUrl({
+        profile: effectiveProfileContext,
+        storagePath: 'facturas/REC-INI-2026-01.pdf',
+        documentOwnerId: 'OWN-0001',
+        sessionExpired: authStatus === 'SESSION_EXPIRED'
+      });
 
-    const outcome = res.error && !res.error.includes('Permiso RBAC verificado') ? 'BLOCKED' : 'ALLOWED';
-    await logGuardEvent({
-      eventType:
-        outcome === 'BLOCKED'
-          ? 'PRIVATE_DOCUMENT_ACCESS_BLOCKED'
-          : 'PRIVATE_DOCUMENT_ACCESS_VERIFIED',
-      targetResource: 'private-documents/facturas/REC-INI-2026-01.pdf',
-      outcome,
-      reason: res.error ?? 'Acceso concedido',
-      dbEnforcementLayer: res.dbCheck
-    });
+      const outcome = res.error && !res.error.includes('Permiso RBAC verificado') ? 'BLOCKED' : 'ALLOWED';
+      await logGuardEvent({
+        eventType:
+          outcome === 'BLOCKED'
+            ? 'PRIVATE_DOCUMENT_ACCESS_BLOCKED'
+            : 'PRIVATE_DOCUMENT_ACCESS_VERIFIED',
+        targetResource: 'private-documents/facturas/REC-INI-2026-01.pdf',
+        outcome,
+        reason: res.error ?? 'Acceso concedido',
+        dbEnforcementLayer: res.dbCheck
+      });
 
-    setPrivateDocStatus(`${res.error ?? 'URL firmada emitida'} — [${res.dbCheck}]`);
+      setPrivateDocStatus(
+        `${res.error ?? (res.signedUrl ? 'URL firmada generada con éxito' : 'Acceso verificado')} — [${res.dbCheck}]`
+      );
+    } finally {
+      setCheckingPrivateDoc(false);
+    }
   };
 
   return (
@@ -242,7 +274,7 @@ export function UsersSecurityModule() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))',
             gap: '20px'
           }}
         >
@@ -273,7 +305,7 @@ export function UsersSecurityModule() {
                     );
                   }}
                 >
-                  {ALL_ROLES.map((r) => (
+                  {ALL_USER_ROLES.map((r) => (
                     <option key={r} value={r}>
                       {ROLES_CATALOG[r].label}
                     </option>
@@ -315,10 +347,11 @@ export function UsersSecurityModule() {
               <button
                 type="button"
                 className="rtw-btn rtw-btn-outline btn-sm"
+                disabled={checkingPrivateDoc}
                 onClick={() => void handleTestPrivateDocument()}
               >
                 <Lock size={14} />
-                Verificar acceso a documentos
+                {checkingPrivateDoc ? 'Verificando...' : 'Verificar acceso a documentos'}
               </button>
               <button
                 type="button"
@@ -347,7 +380,7 @@ export function UsersSecurityModule() {
             )}
           </GlassCard>
 
-          <AuthPortalCard initialMode="UPDATE_PASSWORD" />
+          <AuthPortalCard initialMode="UPDATE_PASSWORD" authenticatedOnly />
         </div>
       )}
 
@@ -408,7 +441,7 @@ export function UsersSecurityModule() {
                     value={newRole}
                     onChange={(e) => setNewRole(e.target.value as UserRole)}
                   >
-                    {ALL_ROLES.map((r) => (
+                    {ALL_USER_ROLES.map((r) => (
                       <option key={r} value={r}>
                         {ROLES_CATALOG[r]?.label ?? r}
                       </option>
@@ -428,9 +461,9 @@ export function UsersSecurityModule() {
                     disabled={newRole !== 'OWNER'}
                   >
                     <option value="">Selecciona un propietario...</option>
-                    {baseline.owners.map((o) => (
+                    {liveOwners.map((o) => (
                       <option key={o.id} value={o.id}>
-                        {o.internalCode} — {o.name}
+                        {o.internal_code} — {o.full_name}
                       </option>
                     ))}
                   </select>
@@ -498,8 +531,12 @@ export function UsersSecurityModule() {
               )}
 
               <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
-                <button type="submit" className="rtw-btn rtw-btn-primary">
-                  Guardar permisos
+                <button
+                  type="submit"
+                  className="rtw-btn rtw-btn-primary"
+                  disabled={savingAdminRole}
+                >
+                  {savingAdminRole ? 'Guardando...' : 'Guardar permisos'}
                 </button>
               </div>
             </form>
@@ -549,7 +586,7 @@ export function UsersSecurityModule() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <GlassDisclosure
             title="Matriz de permisos por módulo"
-            subtitle="Consulta qué puede leer o editar cada rol en los 25 módulos."
+            subtitle={`Consulta qué puede leer o editar cada rol en los ${NAVIGATION_ITEMS.length} módulos.`}
             icon={<ShieldCheck size={16} />}
             defaultOpen
           >
@@ -564,6 +601,7 @@ export function UsersSecurityModule() {
                     <th>Ventas</th>
                     <th>Marketing</th>
                     <th>Propietario</th>
+                    <th>Lectura</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -599,6 +637,7 @@ export function UsersSecurityModule() {
                         <td>{renderCell('SALES_OPERATOR')}</td>
                         <td>{renderCell('MARKETING_OPERATOR')}</td>
                         <td>{renderCell('OWNER')}</td>
+                        <td>{renderCell('VIEWER')}</td>
                       </tr>
                     );
                   })}
